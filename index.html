@@ -5963,7 +5963,7 @@ const Proveedores = (() => {
   const BC_CFG_DEF = { cuentas: {}, ctas: {}, tarjetas: {}, opciones: {}, tasas: {}, agrupar: true };
   const BC = {
     cfg: clon(BC_CFG_DEF), conc: new Map(), datos: new Map(), cola: [], vista: "resumen", sel: null, tab: "formato",
-    marcados: new Set(), periodo: null, error: null, ocupado: "", confirmar: null, filtro: "", borrador: null, verTodos: false,
+    marcados: new Set(), periodo: null, error: null, ocupado: "", confirmar: null, filtro: "", borrador: null, verTodos: false, pas: new Map(),
   };
   S.bc = BC;
   const fmtC = (v) => (v == null || !Number.isFinite(v) ? "–" : (v < 0 ? "-" : "") + miles(Math.floor(Math.abs(v))) + "," + String(Math.round((Math.abs(v) % 1) * 100)).padStart(2, "0").slice(0, 2));
@@ -5973,11 +5973,12 @@ const Proveedores = (() => {
   const MESES_BC = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
   const mesTexto = (p) => (p ? `${MESES_BC[Number(p.slice(5, 7)) - 1]} ${p.slice(0, 4)}` : "");
   const mesAnterior = (p) => { const [a, m] = p.split("-").map(Number); return m === 1 ? `${a - 1}-12` : `${a}-${String(m - 1).padStart(2, "0")}`; };
+  const mesSiguiente = (p) => { const [a, m] = p.split("-").map(Number); return m === 12 ? `${a + 1}-01` : `${a}-${String(m + 1).padStart(2, "0")}`; };
   const idConc = (cuenta, periodo) => `${cuenta}_${periodo}`;
   const REGLAS = {
     exacto: ["Valor exacto", "ok"], grupo: ["Agrupado", "info"], "gastos-mes": ["Gastos del mes", "info"], "fecha-lejana": ["Fecha lejana", "advertencia"],
     "total-dia": ["Total del día", "info"], aproximado: ["Valor aproximado", "advertencia"], tercero: ["Mismo tercero · revisar", "advertencia"],
-    tarjetas: ["Tarjeta (neto)", "info"], "tarjetas-anterior": ["Tarjeta · mes anterior", "advertencia"], anterior: ["Mes anterior", "advertencia"], manual: ["Manual", "gris"],
+    tarjetas: ["Tarjeta (neto)", "info"], bold: ["Datáfono Bold", "ok"], "tarjetas-anterior": ["Tarjeta · mes anterior", "advertencia"], anterior: ["Mes anterior", "advertencia"], manual: ["Manual", "gris"],
   };
   const chipRegla = (r) => { const [t, c] = REGLAS[r] || [r, "gris"]; return `<span class="chip ${c}">${esc(t)}</span>`; };
   const NOMBRE_BANCO_NIT = { Bancolombia: "890903938", "Banco de Bogotá": "860002964", Davivienda: "860034313", BBVA: "860003020", "Banco de Occidente": "890300279", "Banco Popular": "860007738", "AV Villas": "860035827", "Banco Caja Social": "860007335" };
@@ -5985,7 +5986,49 @@ const Proveedores = (() => {
   function cfgCuenta(codigo) { return BC.cfg.cuentas?.[codigo] || {}; }
   function opcionesBC(c) {
     const cc = c ? cfgCuenta(c.cuenta) : {};
-    return { ...(BC.cfg.opciones || {}), tasas: BC.cfg.tasas || {}, ajusteMax: BC.cfg.tarjetas?.ajusteMax ?? Bancos.TARJ_DEF.ajusteMax, nitBanco: cc.nitBanco || (c && NOMBRE_BANCO_NIT[c.banco]) || "" };
+    return { ...(BC.cfg.opciones || {}), tasas: BC.cfg.tasas || {}, ajusteMax: BC.cfg.tarjetas?.ajusteMax ?? Bancos.TARJ_DEF.ajusteMax, nitBanco: cc.nitBanco || (c && NOMBRE_BANCO_NIT[c.banco]) || "", pasarelas: c ? pasarelasPara(c.periodo) : [] };
+  }
+  /* ---------- reporte de transacciones de Bold (datáfono y links de pago) */
+  const pasCache = new Map();
+  function pasarelaDoc(id) {
+    const d = BC.pas.get(id); if (!d) return null;
+    const k = id + "|" + (d.actualizado || "");
+    if (!pasCache.has(k)) pasCache.set(k, Bancos.pasarelaDeDoc(d));
+    return pasCache.get(k);
+  }
+  /** Ventas de Bold del mes y del mes anterior (las del día 30 se abonan el mes siguiente). */
+  function pasarelasPara(periodo) {
+    const ps = new Set([periodo, mesAnterior(periodo)]);
+    const vistos = new Set(), out = [];
+    for (const [id, d] of BC.pas) if (ps.has(d.periodo)) for (const t of pasarelaDoc(id)?.txns || []) if (!vistos.has(t.id)) { vistos.add(t.id); out.push(t); }
+    return out;
+  }
+  const verPas = () => [...BC.pas.values()].map((d) => d.periodo + d.actualizado).sort().join(",");
+  async function guardarPasarela(r) {
+    const id = `${r.pasarela.toLowerCase()}_${r.periodo}`;
+    const doc = { ...Bancos.pasarelaADoc(r), actualizado: new Date().toISOString() };
+    BC.pas.set(id, doc);
+    if (S.db) await S.db.doc("concPasarela/" + id).set(doc);
+    await recalcularPeriodos([r.periodo, mesSiguiente(r.periodo)]);
+    toast(`Reporte de Bold de ${mesTexto(r.periodo)} guardado: ${r.txns.length} ventas, neto $ ${fmtC(r.totales.neto)}.`);
+  }
+  async function borrarPasarela(id) {
+    const d = BC.pas.get(id); if (!d) return;
+    BC.pas.delete(id);
+    if (S.db) { try { await S.db.doc("concPasarela/" + id).delete(); } catch (err) { toast(`No se pudo eliminar: ${err.message || err.code}`); } }
+    await recalcularPeriodos([d.periodo, mesSiguiente(d.periodo)]);
+    toast("Reporte de Bold eliminado."); render();
+  }
+  /** Recalcula y guarda el resumen de las conciliaciones de esos meses (por ejemplo, al cargar el reporte de Bold). */
+  async function recalcularPeriodos(periodos) {
+    for (const c of [...BC.conc.values()].filter((x) => periodos.includes(x.periodo))) {
+      const id = idConc(c.cuenta, c.periodo);
+      if (!BC.datos.has(id) && !(await datosConc(id))) continue;
+      const nuevo = { ...c, actualizado: new Date().toISOString() };
+      BC.conc.set(id, nuevo);
+      Object.assign(nuevo, resumenDoc(resolver(id)));
+      if (S.db) { try { await S.db.doc("conciliaciones/" + id).set(nuevo); } catch (err) { console.error(err); } }
+    }
   }
 
   /* ---------- datos guardados de una conciliación (libro + extracto), con caché */
@@ -6021,7 +6064,7 @@ const Proveedores = (() => {
     const libro = { ...x.libro, desde: x.libro.desde };
     const R = Bancos.conciliar(libro, x.extracto, previo, opcionesBC(c), c.manual || {});
     const cc = cfgCuenta(c.cuenta);
-    const CB = Bancos.comprobantes(R, { codigo: c.cuenta, nombre: x.libro.nombre }, { ctas: BC.cfg.ctas, tarjetas: BC.cfg.tarjetas, nitBanco: cc.nitBanco || NOMBRE_BANCO_NIT[x.extracto.banco] || "", nombreBanco: x.extracto.banco, centro: cc.centro || "", fecha: Bancos.finDeMes(c.periodo), agrupar: BC.cfg.agrupar !== false });
+    const CB = Bancos.comprobantes(R, { codigo: c.cuenta, nombre: x.libro.nombre }, { ctas: BC.cfg.ctas, tarjetas: BC.cfg.tarjetas, nitBold: BC.cfg.nitBold || "", nitBanco: cc.nitBanco || NOMBRE_BANCO_NIT[x.extracto.banco] || "", nombreBanco: x.extracto.banco, centro: cc.centro || "", fecha: Bancos.finDeMes(c.periodo), agrupar: BC.cfg.agrupar !== false });
     return { c, x, R, CB, G: Bancos.gastosBancarios(R), previo: Boolean(previo), ant };
   }
   const memo = { id: null, ver: null, val: null };
@@ -6029,7 +6072,7 @@ const Proveedores = (() => {
     const id = BC.sel; if (!id) return null;
     const c = BC.conc.get(id), x = BC.datos.get(id);
     const ant = c && BC.conc.get(idConc(c.cuenta, mesAnterior(c.periodo)));
-    const ver = JSON.stringify([c?.manual, c?.actualizado, ant?.actualizado, Boolean(x), BC.cfg]);
+    const ver = JSON.stringify([c?.manual, c?.actualizado, ant?.actualizado, Boolean(x), BC.cfg, verPas()]);
     if (memo.id === id && memo.ver === ver) return memo.val;
     memo.id = id; memo.ver = ver; memo.val = resolver(id);
     return memo.val;
@@ -6061,6 +6104,7 @@ const Proveedores = (() => {
           const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null, blankrows: false });
           r = Bancos.leerTabla(filas, file.name);
         }
+        if (r.tipo === "pasarela") { BC.ocupado = `Guardando el reporte de ${r.pasarela}…`; render(); await guardarPasarela(r); if (r.avisos.length) errores.push(`${file.name}: ${r.avisos.slice(0, 3).join(" ")}`); continue; }
         if (r.tipo === "auxiliar") for (const k of r.cuentas) BC.cola.push({ tipo: "libro", archivo: file.name, k: { ...k, desde: r.desde, hasta: r.hasta }, meta: { desde: r.desde, hasta: r.hasta, archivo: file.name, fuente: r.fuente } });
         else BC.cola.push({ tipo: "extracto", archivo: file.name, e: r });
       } catch (err) { console.error(err); errores.push(`${file.name}: ${err.message || err}`); }
@@ -6100,6 +6144,11 @@ const Proveedores = (() => {
     const q = BC.cola.filter((x) => x.tipo === "extracto")[iE];
     if (!q || !q.libro) return;
     const l = q.libro, k = l.k, e = q.e;
+    if (!k.cuenta) { // libro en Excel sin código de cuenta: se toma la cuenta configurada para ese número bancario
+      const cod = Object.entries(BC.cfg.cuentas || {}).find(([, x]) => x.numero && String(x.numero).replace(/\D/g, "") === e.cuenta)?.[0];
+      if (!cod) { toast("El libro auxiliar no trae el código de la cuenta. Configúrelo en Parámetros → Cuentas bancarias con el número de cuenta del banco."); return; }
+      k.cuenta = cod; if (/\.(xlsx?|csv)$/i.test(k.nombre)) k.nombre = BC.cfg.cuentas[cod].nombre || k.nombre;
+    }
     const periodo = (e.hasta || k.hasta).slice(0, 7);
     const id = idConc(k.cuenta, periodo);
     const existe = BC.conc.get(id);
@@ -6242,7 +6291,7 @@ const Proveedores = (() => {
   }
   function zonaBancos(texto) {
     return `<div class="zona" id="zona-bc" tabindex="0" role="button" aria-label="Cargar libros auxiliares y extractos"><b>${texto || "Suelte aquí los libros auxiliares y los extractos"}</b>
-      <span>PDF del libro auxiliar de MantisWeb y extractos de Bancolombia, Banco de Bogotá, Davivienda u otro banco (PDF, Excel o CSV). Puede cargar varios a la vez.</span></div>`;
+      <span>PDF del libro auxiliar de MantisWeb, extractos de Bancolombia, Banco de Bogotá, Davivienda u otro banco (PDF, Excel o CSV) y el reporte mensual de transacciones de Bold (datáfono). Puede cargar varios a la vez.</span></div>`;
   }
   function vistaBcResumen() {
     const ps = periodosBC();
@@ -6277,7 +6326,7 @@ const Proveedores = (() => {
   }
   function vistaBcCargar() {
     const libros = BC.cola.filter((q) => q.tipo === "libro"), exts = BC.cola.filter((q) => q.tipo === "extracto");
-    let html = `<section class="panel"><h2>Cargar libro auxiliar y extracto</h2><p class="sub">Cargue juntos el libro auxiliar de la cuenta (MantisWeb → Libro auxiliar por cuenta) y el extracto del banco del mismo período. La aplicación reconoce cada archivo, lo empareja por número de cuenta y verifica que los saldos y los totales cuadren antes de conciliar.</p>${zonaBancos()}</section>`;
+    let html = `<section class="panel"><h2>Cargar libro auxiliar y extracto</h2><p class="sub">Cargue juntos el libro auxiliar de la cuenta (MantisWeb → Libro auxiliar por cuenta) y el extracto del banco del mismo período. La aplicación reconoce cada archivo, lo empareja por número de cuenta y verifica que los saldos y los totales cuadren antes de conciliar.</p>${zonaBancos()}</section>` + panelPasarelas();
     if (!BC.cola.length) return html + `<p class="pie">Si el banco no entrega PDF legible, exporte el extracto a Excel o CSV con columnas de fecha, descripción y valor (o débito y crédito).</p>`;
     html += `<section class="panel"><h2>Archivos leídos</h2><div class="bc-cola">`;
     exts.forEach((q, i) => {
@@ -6305,6 +6354,19 @@ const Proveedores = (() => {
     return html;
   }
 
+  function panelPasarelas() {
+    const docs = [...BC.pas.entries()].sort((a, b) => b[1].periodo.localeCompare(a[1].periodo));
+    let html = `<section class="panel"><h2>Datáfono y links de pago (Bold)</h2><p class="sub" style="margin:0">Cargue aquí el <b>Reporte mensual de transacciones</b> que descarga de la plataforma de Bold (Excel). Con él, cada abono "PAGO INTERBANC Bold.Co" del extracto se cruza al centavo con las ventas que lo componen, cada venta se busca en el libro por su valor bruto y la retención en la fuente, reteIVA, reteICA y comisión salen exactas en el comprobante, en lugar de estimadas.</p>`;
+    if (!docs.length) return html + `<p class="pie">Todavía no hay reportes de Bold cargados.</p></section>`;
+    html += `<div class="tabla-env"><table class="lista"><thead><tr><th>Mes</th><th>Archivo</th><th class="num">Ventas</th><th class="num">Valor bruto</th><th class="num">Deducciones</th><th class="num">Neto a depositar</th><th></th></tr></thead><tbody>`;
+    for (const [id, d] of docs) {
+      const t = d.totales || {};
+      html += `<tr><td><b>${esc(mesTexto(d.periodo))}</b><br><small>${fechaC(d.desde)} a ${fechaC(d.hasta)}</small></td><td><small>${esc(d.archivo || "")}</small>${d.rechazadas ? `<br><small class="pie">${d.rechazadas} cobro(s) no realizado(s) excluido(s)</small>` : ""}</td><td class="num">${t.n || 0}</td><td class="num">${fmtC(t.bruto)}</td>
+        <td class="num">${fmtC(t.ded)}<br><small class="pie">ret. ${fmtC(r2((t.rf || 0) + (t.riva || 0) + (t.rica || 0)))} · com. ${fmtC(r2((t.com || 0) + (t.fija || 0)))}</small></td><td class="num">${fmtC(t.neto)}</td>
+        <td>${BC.confirmar === "pas:" + id ? `<button class="btn chico peligro" data-bc="borrar-pas" data-id="${esc(id)}">Confirmar</button>` : `<button class="btn chico" data-bc="pedir-borrar-pas" data-id="${esc(id)}">Eliminar</button>`}</td></tr>`;
+    }
+    return html + `</tbody></table></div></section>`;
+  }
   function filaFormato(t, v, clase = "", n = null) {
     const signo = n == null ? "" : v < -0.004 ? "Menos: " : "Más: ";
     return `<tr class="${clase}"><td>${signo}${t}${n != null ? ` <small class="pie">(${n})</small>` : ""}</td><td class="num">${fmtC(n == null ? v : Math.abs(v))}</td></tr>`;
@@ -6321,7 +6383,7 @@ const Proveedores = (() => {
     const { R, CB, x } = z, s = R.saldos, P = R.pendientes;
     const ok = Math.abs(s.diferencia) < 1;
     const pc = R.resumen.movBanco ? Math.round((R.resumen.cruzadosBanco / R.resumen.movBanco) * 100) : 0;
-    const tabs = [["formato", "Conciliación"], ["pendientes", `Pendientes <span class="chip n gris">${P.consignacionesTransito.length + P.egresosPendientes.length + P.ncNoRegistradas.length + P.ndNoRegistradas.length}</span>`], ["comprobante", `Por registrar <span class="chip n gris">${CB.lineas.length}</span>`], ["cruces", `Cruzadas <span class="chip n gris">${R.cruces.length}</span>`], ["validacion", "Validación"]];
+    const tabs = [["formato", "Conciliación"], ["pendientes", `Pendientes <span class="chip n gris">${P.consignacionesTransito.length + P.egresosPendientes.length + P.ncNoRegistradas.length + P.ndNoRegistradas.length}</span>`], ["comprobante", `Por registrar <span class="chip n gris">${CB.lineas.length}</span>`], ["cruces", `Cruzadas <span class="chip n gris">${R.cruces.length}</span>`], ...(R.pasarela?.txns ? [["datafono", `Datáfono Bold <span class="chip n ${R.pasarela.depositos.every((d) => d.cruce) && !R.pasarela.sinLibro.length ? "ok" : "advertencia"}">${R.pasarela.depositos.filter((d) => d.cruce).length}</span>`]] : []), ["validacion", "Validación"]];
     let html = `<section class="panel bc-cab"><div class="fila" style="justify-content:space-between;align-items:flex-start">
       <div><button class="btn chico" data-bc="volver">← Todas las cuentas</button><h2 style="margin-top:8px">${esc(c.cuenta)} · ${esc(c.nombre)}</h2>
       <p class="sub" style="margin:0">${esc(c.banco)} ${esc(c.tipoCta || "")} N.º ${esc(c.numero || "")} · ${esc(mesTexto(c.periodo))} (${fechaC(c.desde)} a ${fechaC(c.hasta)})${z.previo ? " · arrastra pendientes del mes anterior" : ""}</p></div>
@@ -6337,6 +6399,7 @@ const Proveedores = (() => {
     else if (BC.tab === "comprobante") html += bcComprobante(z);
     else if (BC.tab === "cruces") html += bcCruces(z);
     else if (BC.tab === "validacion") html += bcValidacion(z);
+    else if (BC.tab === "datafono" && R.pasarela?.txns) html += bcDatafono(z);
     else html += bcFormato(z);
     if (BC.confirmar === "borrar") html += `<div class="aviso critica"><p>¿Eliminar la conciliación de ${esc(c.nombre)} de ${esc(mesTexto(c.periodo))}? Se borran los movimientos guardados y los cruces manuales.</p><button class="btn peligro" data-bc="borrar" data-id="${esc(BC.sel)}">Eliminar</button><button class="btn" data-bc="cancelar">Cancelar</button></div>`;
     else html += `<p class="pie"><button class="btn chico peligro" data-bc="pedir-borrar">Eliminar esta conciliación</button> Para actualizarla, cargue de nuevo el libro y el extracto: los cruces manuales se conservan.</p>`;
@@ -6346,14 +6409,16 @@ const Proveedores = (() => {
     const { G, c } = z;
     const cargos = G.filas.filter((f) => f.cat !== "intereses"), it = G.intereses;
     const fila = (nombre, total, reg, pend, n, nP, nota = "") => `<tr><td>${esc(nombre)}${nota ? `<div class="pie">${nota}</div>` : ""}</td><td class="num">${n}</td><td class="num">${fmtC(Math.abs(total))}</td><td class="num">${fmtC(Math.abs(reg))}</td><td class="num ${Math.abs(pend) >= 0.005 ? "neg" : ""}">${Math.abs(pend) >= 0.005 ? fmtC(Math.abs(pend)) : "–"}</td><td>${Math.abs(pend) < 0.005 ? '<span class="chip ok">Registrado</span>' : `<span class="chip advertencia">${nP} por registrar</span>`}</td></tr>`;
-    const pendTot = G.pendienteCargos + G.descTarjPend;
+    const pendTot = r2(G.pendienteCargos + G.descTarjPend + (G.boldPend || 0) + (G.difUnico < 0 ? -G.difUnico : 0));
     let html = `<section class="panel bc-gastos"><div class="fila" style="justify-content:space-between;align-items:flex-start"><div><h2>Gastos bancarios de ${esc(mesTexto(c.periodo))}</h2>
       <p class="sub" style="margin:0">Lo que cobró ${esc(c.banco)} según el extracto, comparado con lo registrado en el libro auxiliar. ${pendTot >= 0.5 ? `Registre lo pendiente (el detalle contable está en <b>Por registrar</b>) y luego use <b>Actualizar libro auxiliar</b> para confirmar.` : ""}</p></div>
       ${G.completo ? '<span class="chip ok bc-sello">Gastos bancarios registrados</span>' : `<div class="bc-falta-tot"><span>Falta registrar</span><b>$ ${fmtC(pendTot)}</b></div>`}</div>
       <div class="tabla-env"><table class="lista bc-gas"><thead><tr><th>Concepto</th><th class="num">Mov.</th><th class="num">Según extracto</th><th class="num">En libros</th><th class="num">Falta</th><th>Estado</th></tr></thead><tbody>
       ${cargos.map((f) => fila(f.nombre, f.total, f.registrado, f.pendiente, f.n, f.nPend)).join("")}
       ${G.nTarj ? fila("Descuentos en abonos de tarjetas (comisión, IVA y retenciones)", G.descTarj, G.descTarj - G.descTarjPend, G.descTarjPend, G.nTarj, G.descTarjPend >= 0.005 ? G.nTarj : 0, "Diferencia entre lo vendido en libros y lo abonado por la pasarela (estimado)") : ""}
-      <tr class="bc-totc"><td>Total gastos bancarios</td><td></td><td class="num">${fmtC(G.totalCargos + G.descTarj)}</td><td class="num">${fmtC(G.totalCargos + G.descTarj - pendTot)}</td><td class="num">${pendTot >= 0.005 ? fmtC(pendTot) : "–"}</td><td></td></tr>
+      ${G.bold ? fila("Descuentos del datáfono Bold (retenciones y comisión)", G.bold.ded, G.bold.ded - G.boldPend, G.boldPend, G.bold.n, G.boldPend >= 0.005 ? G.bold.n : 0, `Exactos según el reporte de Bold: ${G.bold.ventas} ventas en ${G.bold.n} abonos${G.bold.registrado ? " · incluidos en el comprobante único de gastos" : ""}`) : ""}
+      ${G.unico ? `<tr class="${Math.abs(G.difUnico) >= 0.5 ? "alerta" : ""}"><td>Comprobante único en libros: ${esc(G.unico.items.find((x) => x.lado === "L")?.doc || "")} ${esc(G.unico.items.find((x) => x.lado === "L")?.concepto || "")}<div class="pie">${esc(G.unico.nota)}</div></td><td></td><td class="num">${fmtC(-G.unico.valorBanco + (G.unico.cubreValor || 0))}</td><td class="num">${fmtC(-G.unico.valorLibro)}</td><td class="num ${Math.abs(G.difUnico) >= 0.5 ? "neg" : ""}">${Math.abs(G.difUnico) >= 0.5 ? fmtC(-G.difUnico) : "–"}</td><td>${Math.abs(G.difUnico) < 0.5 ? '<span class="chip ok">Cuadra</span>' : `<span class="chip advertencia">${G.difUnico < 0 ? "Falta registrar" : "Registrado de más"}</span>`}</td></tr>` : ""}
+      <tr class="bc-totc"><td>Total gastos bancarios</td><td></td><td class="num">${fmtC(G.totalCargos + G.descTarj + (G.bold?.ded || 0))}</td><td class="num">${fmtC(G.totalCargos + G.descTarj + (G.bold?.ded || 0) - pendTot)}</td><td class="num">${pendTot >= 0.005 ? fmtC(pendTot) : "–"}</td><td></td></tr>
       ${it ? fila("Intereses ganados (ingreso)", it.total, it.registrado, it.pendiente, it.n, it.nPend) : ""}
       </tbody></table></div></section>`;
     const u = BC.ultimaAct && BC.ultimaAct.id === BC.sel ? BC.ultimaAct : null;
@@ -6389,7 +6454,7 @@ const Proveedores = (() => {
       </section>`;
     return html;
   }
-  function itemTexto(x) { return x.lado === "B" ? x.desc : `${x.doc} ${x.concepto}${x.tercero ? " · " + x.tercero : ""}`; }
+  function itemTexto(x) { return x.lado === "B" ? x.desc : `${x.doc} ${x.concepto}${x.tercero ? " · " + x.tercero : ""}${x.notaPasarela ? " · " + x.notaPasarela : ""}`; }
   function tablaItems(items, titulo, nota, conSel = true, id = "") {
     if (!items.length) return `<details class="conf bc-grupo" ${id ? `id="${id}"` : ""}><summary>${esc(titulo)} <span class="chip n gris">0</span></summary><div><p class="pie">Sin partidas.</p></div></details>`;
     const tot = items.reduce((s, x) => s + x.valor, 0);
@@ -6440,7 +6505,7 @@ const Proveedores = (() => {
   }
   function bcCruces(z) {
     const { R } = z;
-    const orden = ["manual", "tercero", "aproximado", "tarjetas", "tarjetas-anterior", "anterior", "gastos-mes", "grupo", "total-dia", "fecha-lejana", "exacto"];
+    const orden = ["manual", "tercero", "aproximado", "tarjetas", "tarjetas-anterior", "anterior", "gastos-mes", "bold", "grupo", "total-dia", "fecha-lejana", "exacto"];
     const cs = R.cruces.slice().sort((a, b) => orden.indexOf(a.regla) - orden.indexOf(b.regla));
     const conteo = {}; for (const c of R.cruces) conteo[c.regla] = (conteo[c.regla] || 0) + 1;
     let html = `<section class="panel"><h2>Partidas cruzadas</h2><p class="sub">${Object.entries(conteo).map(([r, n]) => `${chipRegla(r)} ${n}`).join(" &nbsp; ")}</p>
@@ -6453,6 +6518,31 @@ const Proveedores = (() => {
         <td><button class="btn chico" data-bc="deshacer" data-clave="${esc(c.clave)}" data-regla="${esc(c.regla)}">Deshacer</button></td></tr>`;
     }
     html += `</tbody></table></div>${cs.length > lim ? `<button class="btn chico" data-bc="ver-todos">Ver los ${cs.length} cruces</button>` : ""}</section>`;
+    return html;
+  }
+  function bcDatafono(z) {
+    const { R } = z, P2 = R.pasarela;
+    const deps = P2.depositos.filter((d) => d.cruce);
+    const tot = (k) => r2(deps.reduce((a, d) => a + d.det[k], 0));
+    const abBold = R.B.filter((b) => !b.ant && b.valor > 0 && /BOLD/i.test(b.desc));
+    const sinExplicar = abBold.filter((b) => !deps.some((d) => d.b.id === b.id));
+    let html = `<section class="panel"><h2>Datáfono y links de pago Bold</h2><p class="sub" style="margin:0">Cada abono de Bold en el extracto es la suma exacta de los netos de las ventas que lo componen. El descuento (retenciones y comisión) sale del reporte de transacciones, no de un porcentaje estimado.</p></section>
+      <div class="kpis">
+        <div class="kpi"><span>Abonos de Bold cruzados</span><b>${deps.length} de ${abBold.length}</b><small>${fmtC(tot("neto"))} abonados en el banco</small></div>
+        <div class="kpi"><span>Ventas (valor bruto)</span><b>${fmtP(tot("bruto"))}</b><small>${tot("n")} ventas · ${P2.sinLibro.length ? `<b class="neg">${P2.sinLibro.length} sin registrar en libros</b>` : "todas registradas en libros"}</small></div>
+        <div class="kpi"><span>Deducciones de Bold</span><b>${fmtP(tot("ded"))}</b><small>Retefuente ${fmtP(tot("rf"))} · reteIVA ${fmtP(tot("riva"))} · reteICA ${fmtP(tot("rica"))} · comisión ${fmtP(r2(tot("com") + tot("fija")))}</small></div>
+        <div class="kpi"><span>Por abonar</span><b>${fmtP(P2.pendientesAbono.reduce((a, t) => a + t.neto, 0))}</b><small>${P2.pendientesAbono.length} venta(s) cobrada(s) que Bold aún no deposita</small></div>
+      </div>`;
+    if (sinExplicar.length) html += `<div class="aviso advertencia"><p><b>${sinExplicar.length} abono(s) de Bold sin explicar:</b> ${sinExplicar.map((b) => `${fechaC(b.fecha)} ${fmtC(b.valor)}`).join(", ")}. Puede faltar el reporte de Bold de otro mes; cárguelo y la conciliación se recalcula sola.</p></div>`;
+    html += `<section class="panel"><div class="tabla-env"><table class="lista"><thead><tr><th>Abono en el banco</th><th>Ventas que lo componen</th><th class="num">Bruto</th><th class="num">Retenciones</th><th class="num">Comisión</th><th class="num">Neto abonado</th><th>Libro</th></tr></thead><tbody>`;
+    for (const d of deps) {
+      const x = d.det;
+      html += `<tr><td><b>${fechaC(d.b.fecha)}</b><br><small>${esc(d.b.desc)}</small></td><td><small>${x.n} venta(s) del ${x.dias.map(fechaCorta).join(", ")}</small></td><td class="num">${fmtC(x.bruto)}</td><td class="num">${fmtC(r2(x.rf + x.riva + x.rica))}</td><td class="num">${fmtC(r2(x.com + x.fija))}</td><td class="num"><b>${fmtC(x.neto)}</b></td>
+        <td>${x.faltan.length ? `<span class="chip advertencia">${x.faltan.length} sin registrar</span>` : '<span class="chip ok">Completo</span>'}${Math.abs(x.redondeo) >= 0.005 ? `<br><small class="pie">centavos ${fmtC(x.redondeo)}</small>` : ""}</td></tr>`;
+    }
+    html += `<tr class="bc-totc"><td colspan="2">Total</td><td class="num">${fmtC(tot("bruto"))}</td><td class="num">${fmtC(r2(tot("rf") + tot("riva") + tot("rica")))}</td><td class="num">${fmtC(r2(tot("com") + tot("fija")))}</td><td class="num">${fmtC(tot("neto"))}</td><td></td></tr></tbody></table></div></section>`;
+    if (P2.sinLibro.length) html += `<section class="panel"><h3 class="bc-h3">Ventas abonadas por Bold que no están en el libro</h3><div class="tabla-env"><table class="lista"><thead><tr><th>Fecha</th><th>ID Bold</th><th>Canal</th><th>Pagador</th><th class="num">Valor</th></tr></thead><tbody>${P2.sinLibro.map((t) => `<tr><td>${fechaC(t.fecha)}</td><td>${esc(t.id)}</td><td>${esc(t.canal)} · ${esc(t.metodo)}</td><td>${esc(t.pagador)}</td><td class="num">${fmtC(t.bruto)}</td></tr>`).join("")}</tbody></table></div><p class="pie">Están en el comprobante sugerido contra abonos por identificar. Si ya se registraron en otra cuenta o con otro valor, crúcelas a mano en Pendientes.</p></section>`;
+    if (P2.pendientesAbono.length) html += `<section class="panel"><h3 class="bc-h3">Ventas cobradas que Bold aún no abona</h3><div class="tabla-env"><table class="lista"><thead><tr><th>Fecha</th><th>ID Bold</th><th>En el libro</th><th class="num">Bruto</th><th class="num">Neto que llegará</th></tr></thead><tbody>${P2.pendientesAbono.map((t) => { const l = t.libro ? R.porId.get(t.libro) : null; return `<tr><td>${fechaC(t.fecha)} ${esc(t.hora || "")}</td><td>${esc(t.id)}</td><td>${l ? `${esc(l.doc)} ${fmtC(l.valor)}` : '<span class="chip advertencia">No encontrada</span>'}</td><td class="num">${fmtC(t.bruto)}</td><td class="num">${fmtC(t.neto)}</td></tr>`; }).join("")}</tbody></table></div><p class="pie">Quedan como consignaciones en tránsito y se cruzan solas el mes siguiente con el abono de Bold.</p></section>`;
     return html;
   }
   function bcValidacion(z) {
@@ -6471,6 +6561,14 @@ const Proveedores = (() => {
     filas.push([viejas.length ? "advertencia" : "ok", "Partidas de más de 30 días", viejas.length ? `${viejas.length} partida(s) del libro llevan más de 30 días sin aparecer en el banco: ${viejas.slice(0, 5).map((y) => `${y.doc} ${fmtC(y.valor)}`).join(", ")}${viejas.length > 5 ? "…" : ""}.` : "No hay partidas del libro con más de 30 días pendientes."]);
     const grandes = R.cruces.filter((y) => ["tercero", "aproximado"].includes(y.regla) && Math.abs(y.dif) > 1000);
     filas.push([grandes.length ? "advertencia" : "ok", "Diferencias de valor", grandes.length ? `${grandes.length} cruce(s) con diferencias mayores a $1.000: ${grandes.slice(0, 4).map((y) => fmtC(y.dif)).join(", ")}. Revíselos en Cruzadas.` : "Los cruces por valor aproximado tienen diferencias menores a $1.000."]);
+    if (R.pasarela?.txns) {
+      const P2 = R.pasarela, okDep = P2.depositos.filter((d) => d.cruce);
+      const abBold = R.B.filter((b) => !b.ant && b.valor > 0 && /BOLD/i.test(b.desc));
+      filas.push([okDep.length === abBold.length ? "ok" : "advertencia", "Abonos de Bold", okDep.length === abBold.length ? `Los ${abBold.length} abonos de Bold del extracto (${fmtC(abBold.reduce((a, b) => a + b.valor, 0))}) cuadran al centavo con ${okDep.reduce((a, d) => a + d.txns.length, 0)} ventas del reporte.` : `${abBold.length - okDep.length} abono(s) de Bold no se pudieron explicar con el reporte: revise que esté cargado el reporte del mes (y del anterior).`]);
+      filas.push([P2.sinLibro.length ? "advertencia" : "ok", "Ventas de Bold en el libro", P2.sinLibro.length ? `${P2.sinLibro.length} venta(s) abonada(s) por Bold no aparecen en el libro: ${P2.sinLibro.slice(0, 4).map((t) => `${t.id} ${fmtC(t.bruto)}`).join(", ")}. Van al comprobante como abono por identificar.` : "Todas las ventas abonadas por Bold están registradas en el libro por su valor bruto."]);
+      if (P2.pendientesAbono.length) filas.push(["info", "Ventas de Bold por abonar", `${P2.pendientesAbono.length} venta(s) por ${fmtC(P2.pendientesAbono.reduce((a, t) => a + t.bruto, 0))} (neto ${fmtC(P2.pendientesAbono.reduce((a, t) => a + t.neto, 0))}) se cobraron pero Bold aún no las deposita: quedan en tránsito.`]);
+    }
+    if (z.G.unico) filas.push([Math.abs(z.G.difUnico) < 0.5 ? "ok" : "advertencia", "Comprobante único de gastos bancarios", z.G.unico.nota + (Math.abs(z.G.difUnico) < 0.5 ? "." : `. La diferencia de ${fmtC(Math.abs(z.G.difUnico))} va al comprobante sugerido para revisar.`)]);
     filas.push([Math.abs(s.diferencia) < 1 ? "ok" : "error", "Resultado", Math.abs(s.diferencia) < 1 ? "La conciliación cuadra." : `Diferencia sin explicar de ${fmtC(s.diferencia)}.`]);
     return `<section class="panel"><h2>Validación</h2><ul class="hallazgos">${filas.map(([t, a, d]) => `<li><span class="chip ${t}">${t === "ok" ? "Correcto" : t === "info" ? "Dato" : t === "advertencia" ? "Revisar" : "Error"}</span><b>${esc(a)}.</b> ${esc(d)}</li>`).join("")}</ul>
       <p class="pie">Archivos: ${esc(c.archivoLibro || "")} · ${esc(c.archivoBanco || "")}. Última actualización ${esc((c.actualizado || "").slice(0, 16).replace("T", " "))}.</p></section>`;
@@ -6567,6 +6665,12 @@ const Proveedores = (() => {
             const cr = [["Cruce", "Regla", "Lado", "Fecha", "Documento", "Detalle", "Valor", "Diferencia del cruce"]];
             for (const k of R.cruces) for (const it of k.items) cr.push([k.id, (REGLAS[k.regla] || [k.regla])[0], it.lado === "L" ? "Libro" : "Banco", it.fecha, it.doc || "", itemTexto(it), it.valor, k.dif]);
             hoja("Cruzadas", cr, [7, 18, 7, 11, 14, 60, 14, 14]);
+            if (R.pasarela?.txns) {
+              const db = [["Fecha abono", "Valor abonado", "Ventas", "Días de venta", "Bruto", "Retefuente", "ReteIVA", "ReteICA", "Comisión %", "Comisión fija", "Total deducido", "Neto", "Centavos libro", "Ventas sin registrar"]];
+              for (const d of R.pasarela.depositos.filter((x) => x.cruce)) { const x = d.det; db.push([d.b.fecha, d.b.valor, x.n, x.dias.join(" "), x.bruto, x.rf, x.riva, x.rica, x.com, x.fija, x.ded, x.neto, x.redondeo, x.faltan.map((f) => f.id).join(" ")]); }
+              db.push([], ["Ventas por abonar"], ["Fecha", "ID Bold", "Bruto", "Neto"], ...R.pasarela.pendientesAbono.map((t) => [t.fecha, t.id, t.bruto, t.neto]));
+              hoja("Datáfono Bold", db, [11, 14, 7, 24, 14, 12, 12, 12, 12, 12, 14, 14, 10, 30]);
+            }
             hoja("Libro", [["Fecha", "Documento", "NIT", "Tercero", "Concepto", "Débito", "Crédito", "Cruce"], ...R.L.filter((y) => !y.ant).map((y) => [y.fecha, y.doc, y.nit, y.tercero, y.concepto, y.valor > 0 ? y.valor : 0, y.valor < 0 ? -y.valor : 0, y.par || "Pendiente"])], [11, 14, 12, 22, 40, 14, 14, 9]);
             hoja("Extracto", [["Fecha", "Descripción", "Documento", "Tipo", "Valor", "Cruce"], ...R.B.filter((y) => !y.ant).map((y) => [y.fecha, y.desc, y.doc, Bancos.NOMBRE_CAT[y.cat], y.valor, y.par || "Pendiente"])], [11, 60, 12, 34, 14, 9]);
             data = XLSX.write(wb, { type: "array", bookType: "xlsx" }); nombre = base + ".xlsx";
@@ -6608,6 +6712,8 @@ const Proveedores = (() => {
     }
     if (a === "agrupar" || a === "detallar") { const n = clon(BC.cfg); n.agrupar = a === "agrupar"; BC.cfg = n; if (S.db) S.db.doc("config/bancos").set(n).catch(() => {}); return render(); }
     if (a === "pedir-borrar") { BC.confirmar = "borrar"; return render(); }
+    if (a === "pedir-borrar-pas") { BC.confirmar = "pas:" + t.dataset.id; return render(); }
+    if (a === "borrar-pas") { BC.confirmar = null; return borrarPasarela(t.dataset.id); }
     if (a === "cancelar") { BC.confirmar = null; return render(); }
     if (a === "borrar") return borrarConc(t.dataset.id);
     if (a === "guardar-cfg") {
@@ -7268,6 +7374,10 @@ const Proveedores = (() => {
     db.collection("conciliaciones").onSnapshot((snap) => {
       S.bc.conc = new Map(snap.docs.map((d) => [d.id, d.data()]));
       if (!S.cargando && !(S.tab === "bancos" && S.bc.sucio)) render();
+    }, () => {});
+    db.collection("concPasarela").onSnapshot((snap) => {
+      S.bc.pas = new Map(snap.docs.map((d) => [d.id, d.data()]));
+      if (!S.cargando && S.tab === "bancos" && !S.bc.sucio) render();
     }, () => {});
     db.doc("config/bancos").onSnapshot((snap) => {
       if (snap.exists) S.bc.cfg = { ...clon(BC_CFG_DEF), ...snap.data() };
