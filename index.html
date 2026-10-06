@@ -2,7 +2,42 @@
 <title>Estados Financieros Districlínicas</title>
 <script src="config.js"></script>
 <script src="plataforma.js"></script>
-<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}
+/* Formularios con estructura oficial */
+.fdian{padding:18px 20px}
+.fdian .fd-top{display:flex;justify-content:space-between;align-items:stretch;border:2px solid #1d6b4f;border-radius:6px 6px 0 0;overflow:hidden}
+.fdian .fd-tit{padding:10px 14px;display:flex;flex-direction:column;gap:2px}
+.fdian .fd-tit b{font:700 16px var(--f-doc,inherit);color:#134a37}
+.fdian .fd-tit span{font-size:12px;color:#56637a}
+.fdian .fd-num{background:#1d6b4f;color:#fff;font:700 28px var(--f-doc,inherit);display:grid;place-items:center;padding:0 18px;min-width:90px}
+.fdian .fd-cab{display:grid;grid-template-columns:repeat(4,1fr);border:2px solid #1d6b4f;border-top:0;margin-bottom:14px}
+@media (min-width:900px){.fdian .fd-cab{grid-template-columns:repeat(8,1fr)}}
+.fdian .fd-cc{border-right:1px solid #cfe0d8;border-top:1px solid #cfe0d8;padding:5px 8px;min-width:0}
+.fdian .fd-cc label{display:block;font-size:10.5px;color:#56637a;text-transform:uppercase;letter-spacing:.02em}
+.fdian .fd-cc label i{font-style:normal;font-weight:700;color:#1d6b4f}
+.fdian .fd-cc b{font-size:13.5px;color:#15233f;overflow-wrap:anywhere}
+.fdian .fd-sub{background:#e6f1ec;color:#134a37;font:700 12px var(--f-doc,inherit);text-transform:uppercase;letter-spacing:.03em;padding:6px 10px;margin-top:12px;border-left:4px solid #1d6b4f}
+.fdian .fd-mat{width:100%;border-collapse:collapse;font-size:12.5px}
+.fdian .fd-mat th{background:#1d6b4f;color:#fff;font-weight:600;padding:6px;border:1px solid #fff;font-size:11.5px}
+.fdian .fd-mat td{border:1px solid #cfe0d8;padding:3px 5px;vertical-align:middle}
+.fdian .fd-mat td.fd-vacia{background:repeating-linear-gradient(135deg,#f3f6f5 0 6px,#fff 6px 12px)}
+.fdian .fd-mat tr.fd-sec td{background:#e6f1ec;color:#134a37;font-weight:700;text-transform:uppercase;font-size:11.5px}
+.fdian .fd-et{color:#15233f;font-size:12.5px}
+.fdian .fd-cas{display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.fdian .fd-n{display:inline-grid;place-items:center;min-width:26px;height:20px;padding:0 4px;background:#1d6b4f;color:#fff;border-radius:3px;font-size:10.5px;font-weight:700}
+.fdian .fd-v{font-variant-numeric:tabular-nums;min-width:96px;text-align:right;color:#15233f;font-weight:600}
+.fdian .fd-dec{flex-basis:100%;text-align:right;font-size:10.5px;color:#b42318}
+.fdian .fd-lista{display:grid;gap:0;margin-top:8px}
+.fdian .fd-dos{grid-template-columns:1fr}
+@media (min-width:1000px){.fdian .fd-dos{grid-template-columns:1fr 1fr;column-gap:22px}}
+.fdian .fd-fila{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 2px;border-bottom:1px solid #e3ece8}
+.fdian .fd-fila.fd-tot .fd-et,.fdian .fd-fila.fd-tot .fd-v{font-weight:700}
+.fdian .fd-fila.fd-gran{background:#e6f1ec}
+.fdian .fd-fila.fd-gran .fd-et,.fdian .fd-fila.fd-gran .fd-v{font-weight:700;color:#134a37}
+.fdian .fd-pie{font-size:11.5px;color:#56637a;margin:12px 0 0}
+.fdian .fd-acc{margin-top:10px}
+@media print{.fdian{box-shadow:none;border:0}.fdian .fd-dos{grid-template-columns:1fr 1fr;column-gap:16px}.fdian .fd-cab{grid-template-columns:repeat(8,1fr)}}
+</style></head><body>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
@@ -4958,7 +4993,9 @@ const Proveedores = (() => {
         const alt = Impuestos.liquidarIca(movBimestre(p).mov, movBimestre(p).movCentro, { ...ci }, { sanciones: opc.sancionesIca, saldoFavorAnterior: opc.saldoFavorAnteriorIca });
         extra += `<div class="aviso advertencia"><p>Con este método las ventas de los centros de fuera del distrito y sus devoluciones quedan gravadas en ${esc(ci.municipio)}. Excluyéndolas, el total a pagar sería $${fmt(alt.R[34])} (diferencia $${fmt(mod.X.R[34] - alt.R[34])}).</p></div>`;
       }
-      return sub + extra + modeloHTML(mod);
+      if (mod.error) return sub + extra + modeloHTML(mod);
+      const form = S.impVista === "iva" ? form300HTML(p, mod.X) : formIcaHTML(p, mod.X);
+      return sub + extra + form + `<details class="conf" style="background:var(--hoja)"><summary>Liquidación detallada y comparación con lo presentado</summary><div>${modeloHTML(mod)}</div></details>`;
     }
     return sub + vistaRetencion();
   }
@@ -5334,6 +5371,133 @@ const Proveedores = (() => {
       pie: [`Factor de anualización 12 / ${D.mes}. Tarifa ${D.c.tarifa} %, TTD ${D.c.ttd} %, anticipo ${D.c.pctAnticipo} %. Proyección de planeación tributaria: no reemplaza la liquidación definitiva (conciliación fiscal, formato 2516).`], firmas: true };
   }
 
+  /* ------------------------------------------------------------ formularios con la estructura oficial (borrador) */
+  const F350_FILAS = [
+    // [concepto de la liquidación, etiqueta, [base PJ, ret PJ] | null, [base PN, ret PN] | null]
+    ["trabajo", "Rentas de trabajo", null, [77, 93]], ["pensiones", "Rentas de pensiones", null, [78, 94]],
+    ["honorarios", "Honorarios", [29, 42], [79, 95]], ["comisiones", "Comisiones", [30, 43], [80, 96]], ["servicios", "Servicios", [31, 44], [81, 97]],
+    ["rendimientos", "Rendimientos financieros e intereses", [32, 45], [82, 98]], ["arrendamientos", "Arrendamientos (muebles e inmuebles)", [33, 46], [83, 99]],
+    ["regalias", "Regalías y explotación de la propiedad intelectual", [34, 47], [84, 100]], ["dividendos", "Dividendos y participaciones", [35, 48], [85, 101]],
+    ["compras", "Compras", [36, 49], [86, 102]], ["tarjetas", "Transacciones con tarjetas débito y crédito", [37, 50], [87, 103]],
+    ["construccion", "Contratos de construcción", [38, 51], [88, 104]], ["activos", "Enajenación de activos fijos de personas naturales ante notarios y autoridades de tránsito", null, [89, 105]],
+    ["loterias", "Loterías, rifas, apuestas y similares", [39, 52], [90, 106]], ["hidrocarburos", "Hidrocarburos, carbón y demás productos mineros", [40, 53], [91, 107]],
+    ["otros", "Otros pagos sujetos a retención", [41, 54], [92, 108]], ["exterior", "Pagos o abonos en cuenta al exterior a países sin convenio", [55, 57], [109, 111]],
+    ["exterior_conv", "Pagos o abonos en cuenta al exterior a países con convenio vigente", [56, 58], [110, 112]],
+  ];
+  const F350_AUTO = [["Contribuyentes exonerados de aportes (art. 114-1 E.T.)", [59, 68], null], ["Ventas", [60, 69], [113, 121]], ["Honorarios", [61, 70], [114, 122]], ["Comisiones", [62, 71], [115, 123]],
+    ["Servicios", [63, 72], [116, 124]], ["Rendimientos financieros", [64, 73], [117, 125]], ["Pagos mensuales provisionales de carácter voluntario (hidrocarburos)", [65, 74], [118, 126]],
+    ["Exportación de hidrocarburos, carbón y demás productos mineros", [66, 75], [119, 127]], ["Otros conceptos", [67, 76], [120, 128]]];
+  const F300 = [
+    ["Ingresos", [[27, "Por operaciones gravadas al 5 %"], [28, "Por operaciones gravadas a la tarifa general"], [29, "AIU por operaciones gravadas (base gravable especial)"], [30, "Por exportación de bienes"], [31, "Por exportación de servicios"],
+      [32, "Por ventas a sociedades de comercialización internacional"], [33, "Por ventas a zona franca"], [34, "Por juegos de suerte y azar"], [35, "Por operaciones exentas"], [36, "Por venta de cerveza de producción nacional o importada"],
+      [37, "Por ventas de gaseosas y similares"], [38, "Por venta de licores, aperitivos, vinos y similares"], [39, "Por operaciones excluidas"], [40, "Por operaciones no gravadas"], [41, "Total ingresos brutos", 1],
+      [42, "Devoluciones en ventas anuladas, rescindidas o resueltas"], [43, "Total ingresos netos recibidos durante el período", 1]]],
+    ["Compras · importaciones", [[44, "De bienes gravados a la tarifa del 5 %"], [45, "De bienes gravados a la tarifa general"], [46, "De bienes y servicios gravados provenientes de zonas francas"], [47, "De bienes no gravados"],
+      [48, "De bienes excluidos, exentos y no gravados provenientes de zonas francas"], [49, "De servicios"]]],
+    ["Compras · nacionales", [[50, "De bienes gravados a la tarifa del 5 %"], [51, "De bienes gravados a la tarifa general"], [52, "De servicios gravados a la tarifa del 5 %"], [53, "De servicios gravados a la tarifa general"],
+      [54, "De bienes y servicios excluidos, exentos y no gravados"], [55, "Total compras e importaciones brutas", 1], [56, "Devoluciones en compras anuladas, rescindidas o resueltas en este período"], [57, "Total compras netas realizadas durante el período", 1]]],
+    ["Liquidación privada · impuesto generado", [[58, "A la tarifa del 5 %"], [59, "A la tarifa general"], [60, "Sobre AIU en operaciones gravadas (base gravable especial)"], [61, "En juegos de suerte y azar"],
+      [62, "En venta de cerveza de producción nacional o importada"], [63, "En venta de gaseosas y similares"], [64, "En venta de licores, aperitivos, vinos y similares"], [65, "En retiro inventario para activos fijos, consumo, muestras gratis o donaciones"],
+      [66, "IVA recuperado en devoluciones en compras anuladas, rescindidas o resueltas"], [67, "Total impuesto generado por operaciones gravadas", 1]]],
+    ["Liquidación privada · impuesto descontable", [[68, "Por importaciones gravadas a la tarifa del 5 %"], [69, "Por importaciones gravadas a la tarifa general"], [70, "De bienes y servicios gravados provenientes de zonas francas"],
+      [71, "Por compras de bienes gravados a la tarifa del 5 %"], [72, "Por compras de bienes gravados a la tarifa general"], [73, "Por licores, aperitivos, vinos y similares"], [74, "Por servicios gravados a la tarifa del 5 %"],
+      [75, "Por servicios gravados a la tarifa general"], [76, "Descuento IVA exploración hidrocarburos (art. 485-2 E.T.)"], [77, "Total impuesto pagado o facturado", 1],
+      [78, "IVA retenido por servicios prestados en Colombia por no domiciliados o no residentes"], [79, "IVA resultante por devoluciones en ventas anuladas, rescindidas o resueltas"],
+      [80, "Ajuste impuestos descontables (pérdidas, hurto o castigo de inventarios)"], [81, "Total impuestos descontables", 1]]],
+    ["Control de saldos", [[82, "Saldo a pagar por el período fiscal"], [83, "Saldo a favor del período fiscal"], [84, "Saldo a favor del período fiscal anterior"], [85, "Retenciones por IVA que le practicaron"],
+      [86, "Saldo a pagar por impuesto", 1], [87, "Sanciones"], [88, "Total saldo a pagar", 2], [89, "Total saldo a favor", 1]]],
+    ["Control saldos a favor", [[90, "Saldo a favor susceptible de devolución y/o compensación por el presente período"], [91, "Saldo a favor susceptible de ser devuelto y/o compensado a imputar en el período siguiente"],
+      [92, "Saldo a favor sin derecho a devolución y/o compensación susceptible de ser imputado en el siguiente período"], [93, "Total saldo a favor a imputar al período siguiente", 1]]],
+  ];
+  const FICA = [
+    ["B. Base gravable", [[8, "Total ingresos ordinarios y extraordinarios del período en todo el país"], [9, "Menos ingresos fuera de este distrito"], [10, "Total ingresos ordinarios y extraordinarios en este distrito", 1],
+      [11, "Menos ingresos por devoluciones, rebajas, descuentos"], [12, "Menos ingresos por exportaciones"], [13, "Menos ingresos por venta de activos fijos"],
+      [14, "Menos ingresos por actividades excluidas o no sujetas y otros ingresos no gravados"], [15, "Menos ingresos por otras actividades exentas en este distrito"], [16, "Total ingresos gravables", 1]]],
+    ["D. Liquidación privada", [[18, "Total impuesto de industria y comercio"], [19, "Impuesto de avisos y tableros"], [20, "Pago por unidades comerciales adicionales del sector financiero"], [21, "Sobretasa bomberil"],
+      [22, "Total impuesto a cargo", 1], [23, "Menos valor de exención o exoneración sobre el impuesto"], [24, "Menos retenciones que le practicaron a favor de este distrito"],
+      [25, "Menos autorretenciones practicadas a favor de este distrito"], [26, "Sanciones"], [27, "Menos saldo a favor del período anterior"], [28, "Total saldo a cargo", 1], [29, "Total saldo a favor", 1]]],
+    ["E. Pagos", [[30, "Valor a pagar"], [31, "Intereses de mora"], [34, "Total a pagar en bancos", 2]]],
+  ];
+  function nitDv() { const s = String(S.cfg.empresa.nit || ""); const m = s.match(/^([\d.]+)-?(\d)?$/); return { nit: (m ? m[1] : s).replace(/\D/g, ""), dv: m && m[2] ? m[2] : "" }; }
+  /** Valores del 350 por renglón a partir de la liquidación del mes. */
+  function valores350(L) {
+    const V = {};
+    const sumar = (n, v) => { V[n] = (V[n] || 0) + (v || 0); };
+    for (const r of L.renglones) {
+      const fila = F350_FILAS.find((f) => f[0] === r.concepto) || F350_FILAS.find((f) => f[0] === "otros");
+      const lado = r.tipo === "natural" ? fila[3] || fila[2] : fila[2] || fila[3];
+      sumar(lado[0], r.baseR); sumar(lado[1], r.retencionR);
+    }
+    for (const a of L.autorrets) { sumar(59, a.baseR); sumar(68, a.retencionR); }
+    V[129] = L.excesoR || 0; V[130] = L.totalRenta; V[131] = L.ivaR; V[132] = 0; V[133] = L.excesoIvaR || 0; V[134] = L.totalIva; V[135] = 0;
+    V[136] = L.total; V[137] = 0; V[138] = L.total; V[980] = L.total;
+    return V;
+  }
+  function casillaHTML(n, valor, decl, extra = "") {
+    const dif = decl && decl[n] != null && Math.abs((decl[n] || 0) - (valor || 0)) >= 1000;
+    return `<div class="fd-cas ${extra}"><span class="fd-n">${n}</span><span class="fd-v">${valor == null ? "" : fmt(valor || 0)}</span>${dif ? `<span class="fd-dec" title="Valor del formulario presentado">presentado ${fmt(decl[n] || 0)}</span>` : ""}</div>`;
+  }
+  function formEncabezado(num, titulo, sub, campos) {
+    return `<div class="fd-top"><div class="fd-tit"><b>${esc(titulo)}</b><span>${esc(sub)}</span></div><div class="fd-num">${esc(num)}</div></div>
+      <div class="fd-cab">${campos.map(([n, t, v, ancho]) => `<div class="fd-cc" style="grid-column:span ${ancho || 1}"><label>${n ? `<i>${n}</i> ` : ""}${esc(t)}</label><b>${esc(v ?? "")}</b></div>`).join("")}</div>`;
+  }
+  function formPie(decl, nota) {
+    return `<p class="fd-pie">Valores en pesos, aproximados al múltiplo de mil más cercano. ${esc(nota)} ${decl ? `Donde aparece «presentado», el formulario cargado (N.° ${esc(decl.formulario || "")}) tiene otro valor.` : ""} Este es un borrador con la misma estructura del formulario: la declaración se diligencia y firma en el portal de la entidad.</p>`;
+  }
+  function form350HTML(periodo, L) {
+    const [a, m] = anioMes(periodo), e = S.cfg.empresa, { nit, dv } = nitDv();
+    const V = valores350(L), D = declDe("350", a, m)?.R || null;
+    const c = (n, cls = "") => (n == null ? `<td class="fd-vacia"></td>` : `<td>${casillaHTML(n, V[n] || 0, D, cls)}</td>`);
+    let h = `<section class="hoja fdian" id="form-350">` + formEncabezado("350", "Declaración de Retenciones en la Fuente", `Formulario 350 · ${MESES[m - 1]} de ${a} · borrador para transcribir`,
+      [[1, "Año", a], [3, "Período", String(m).padStart(2, "0")], [5, "NIT", nit], [6, "DV", dv], [11, "Razón social", e.razon, 3], [12, "Cód. Dirección seccional", S.cfg.impuestos.seccional || ""]]);
+    h += `<div class="tabla-env"><table class="fd-mat"><thead><tr><th rowspan="2">Retenciones a título de renta y complementario</th><th colspan="2">Personas jurídicas</th><th colspan="2">Personas naturales</th></tr><tr><th>Base sujeta a retención</th><th>Retenciones</th><th>Base sujeta a retención</th><th>Retenciones</th></tr></thead><tbody>`;
+    for (const [, t, pj, pn] of F350_FILAS) h += `<tr><td class="fd-et">${esc(t)}</td>${c(pj?.[0])}${c(pj?.[1])}${c(pn?.[0])}${c(pn?.[1])}</tr>`;
+    h += `<tr class="fd-sec"><td colspan="5">Autorretenciones</td></tr>`;
+    for (const [t, pj, pn] of F350_AUTO) h += `<tr><td class="fd-et">${esc(t)}</td>${c(pj?.[0])}${c(pj?.[1])}${c(pn?.[0])}${c(pn?.[1])}</tr>`;
+    h += `</tbody></table></div><div class="fd-lista">`;
+    const fila = (n, t, cls = "") => `<div class="fd-fila ${cls}"><span class="fd-et">${esc(t)}</span>${casillaHTML(n, V[n] || 0, D)}</div>`;
+    h += fila(129, "Menos retenciones practicadas en exceso o indebidas o por operaciones anuladas, rescindidas o resueltas") + fila(130, "Total retenciones renta y complementario", "fd-tot");
+    h += `<div class="fd-sub">Retenciones a título de IVA</div>` + fila(131, "A responsables del impuesto sobre las ventas") + fila(132, "Practicadas por servicios a no residentes o no domiciliados")
+      + fila(133, "Menos retenciones practicadas en exceso o indebidas o por operaciones anuladas, rescindidas o resueltas") + fila(134, "Total retenciones IVA", "fd-tot");
+    h += fila(135, "Retenciones impuesto timbre nacional") + fila(136, "Total retenciones", "fd-tot") + fila(137, "Sanciones") + fila(138, "Total retenciones más sanciones", "fd-gran") + fila(980, "Pago total", "fd-gran");
+    h += `</div>` + formPie(declDe("350", a, m), L.fuente === "balance" ? "Sin anexo de retenciones: las retenciones se ubicaron como personas jurídicas; cargue el anexo para separar naturales y jurídicas." : "") + `<div class="fd-acc"><button class="btn chico" data-imprimirform="form-350">Imprimir o guardar en PDF</button></div></section>`;
+    return h;
+  }
+  function formListaHTML(id, num, titulo, sub, cab, secciones, R, D, nota, extra = "") {
+    let h = `<section class="hoja fdian" id="${id}">` + formEncabezado(num, titulo, sub, cab);
+    for (const [i, [s, filas]] of secciones.entries()) {
+      if (i === 1) h += extra; // la sección C del ICA va después de la base gravable
+      h += `<div class="fd-sub">${esc(s)}</div><div class="fd-lista fd-dos">`;
+      h += filas.map(([n, t, nivel]) => `<div class="fd-fila ${nivel === 2 ? "fd-gran" : nivel ? "fd-tot" : ""}"><span class="fd-et">${esc(t)}</span>${casillaHTML(n, R[n] ?? 0, D)}</div>`).join("");
+      h += `</div>`;
+    }
+    return h + formPie(D ? { formulario: D.__f } : null, nota) + `<div class="fd-acc"><button class="btn chico" data-imprimirform="${id}">Imprimir o guardar en PDF</button></div></section>`;
+  }
+  function form300HTML(periodo, X) {
+    const bm = Impuestos.bimestre(periodo), { nit, dv } = nitDv(), d = declDe("300", bm.anio, bm.numero);
+    const D = d ? { ...d.R, __f: d.formulario } : null;
+    return formListaHTML("form-300", "300", "Declaración del Impuesto sobre las Ventas – IVA", `Formulario 300 · bimestre ${bm.numero} (${NOMBRE_BIM[bm.numero - 1]}) de ${bm.anio} · borrador para transcribir`,
+      [[1, "Año", bm.anio], [3, "Período", bm.numero], [5, "NIT", nit], [6, "DV", dv], [11, "Razón social", S.cfg.empresa.razon, 3], [12, "Cód. Dirección seccional", S.cfg.impuestos.seccional || ""]],
+      F300, X.R, D, "Periodicidad bimestral.");
+  }
+  function formIcaHTML(periodo, X) {
+    const bm = Impuestos.bimestre(periodo), ci = S.cfg.impuestos.ica, { nit, dv } = nitDv(), d = declDe("ica", bm.anio, bm.numero);
+    const D = d ? { ...d.R, __f: d.formulario } : null;
+    const [cod, ...act] = String(ci.actividad || "").split(/\s*[–-]\s*/);
+    const extra = `<div class="fd-sub">C. Discriminación de ingresos gravados y actividades desarrolladas</div><div class="tabla-env"><table class="fd-mat"><thead><tr><th>Código CIIU</th><th>Actividad</th><th>Ingresos gravados</th><th>Tarifa (por mil)</th><th>Impuesto</th></tr></thead>
+      <tbody><tr><td>${esc(cod)}</td><td class="fd-et">${esc(act.join(" – "))}</td><td>${casillaHTML(16, X.R[16], null)}</td><td style="text-align:center">${esc(String(ci.tarifaPorMil).replace(".", ","))}</td><td>${casillaHTML(17, X.R[17], null)}</td></tr></tbody></table></div>`;
+    return formListaHTML("form-ica", "ICA", `Declaración del Impuesto de Industria y Comercio · ${ci.municipio}`, `Año gravable ${bm.anio} · período ${NOMBRE_BIM[bm.numero - 1]} (bimestre ${bm.numero}) · borrador para transcribir`,
+      [["", "Año gravable", bm.anio], ["", "Período", NOMBRE_BIM[bm.numero - 1].toUpperCase()], ["", "NIT", nit], ["", "DV", dv], ["", "Razón social", S.cfg.empresa.razon, 3], ["", "Municipio", ci.municipio]],
+      FICA, X.R, D, `Avisos y tableros ${ci.avisosPct} % del impuesto; sobretasa bomberil ${ci.bomberilPct} %.`, extra);
+  }
+  document.addEventListener("click", (ev) => {
+    const b = ev.target.closest?.("[data-imprimirform]"); if (!b) return;
+    const sec = document.getElementById(b.dataset.imprimirform); if (!sec) return;
+    const w = window.open("", "_blank"); if (!w) { toast("El navegador bloqueó la ventana de impresión. Permita las ventanas emergentes para este sitio."); return; }
+    const css = [...document.querySelectorAll("style")].map((s) => s.textContent).join("\n");
+    w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Formulario ${esc(b.dataset.imprimirform.replace("form-", ""))}</title><style>${css}\nbody{background:#fff;padding:12px}.fd-acc{display:none}@page{size:letter;margin:10mm}</style></head><body>${sec.outerHTML}</body></html>`);
+    w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+  });
   function vistaRetencion() {
     const p = S.periodo;
     const rep = S.imp.get(p);
@@ -5359,7 +5523,8 @@ const Proveedores = (() => {
       <div class="campo"><label for="imp-trab" style="font-size:12px;color:var(--suave)">Base de rentas de trabajo (pagos laborales del mes)</label><input id="imp-trab" type="number" data-impbase="1" placeholder="Automática: ${esc((ci.cuentasTrabajo || []).join(", "))}" value="${manual ?? ""}"></div>
       <p class="pie" style="margin:0;max-width:520px">Si la deja vacía se suma el movimiento del mes de las cuentas ${esc((ci.cuentasTrabajo || []).join(", "))}. Las tarifas de autorretención, las cuentas base y la asignación de subcuentas a conceptos se ajustan en Configuración → Impuestos.</p>
       <div class="fila" style="margin-left:auto"><button class="btn primario" data-exportar="pdf-imp">PDF de la liquidación</button><button class="btn" data-exportar="excel-imp">Excel</button></div></div></section>`;
-    html += modeloHTML(mI);
+    html += form350HTML(p, L);
+    html += `<details class="conf" style="background:var(--hoja)"><summary>Liquidación detallada por concepto</summary><div>${modeloHTML(mI)}</div></details>`;
     const d350 = declDe("350", ...anioMes(p));
     if (d350 && S.hist.has(p)) html += modeloHTML(comparacion350(L, d350));
     else if (d350) html += `<div class="aviso info"><p>Hay un formulario 350 presentado para este mes (N.° ${esc(d350.formulario)}, total ${fmt(d350.R[138])}), pero falta el balance del mes para compararlo.</p></div>`;
