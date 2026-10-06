@@ -4889,8 +4889,10 @@ const Proveedores = (() => {
     const filas = renglones.map(([n, txt, tipo]) => (n === "seccion" ? { tipo: "seccion", celdas: [txt] } : { tipo: tipo || "rubro", celdas: [txt, String(n), R[n]], sinNa: true }));
     return { clave, hoja, titulo, periodoTexto, cols, filas, pie, firmas: true };
   }
-  function modeloIva(periodo = S.periodo) {
+  /** opts.sinSaldos: solo el movimiento del bimestre, sin sumar saldos iniciales pendientes (para el acumulado del año). */
+  function modeloIva(periodo = S.periodo, opts = {}) {
     const m = movBimestre(periodo), bm = m.bm;
+    if (opts.sinSaldos && m.mov) m.mov = { ...m.mov, sa: () => 0 };
     const opc = S.cfg.impuestos.opcBimestre?.[`${bm.anio}-${bm.numero}`] || {};
     const periodoTexto = `Año ${bm.anio} · Período ${bm.numero} (${NOMBRE_BIM[bm.numero - 1]}) · Formulario 300 (borrador)`;
     if (m.error) return { clave: "iva", hoja: "IVA 300", titulo: "Liquidación del Impuesto sobre las Ventas", periodoTexto, cols: [{ t: "Concepto", tipo: "txt" }], filas: [], pie: [m.error], error: m.error };
@@ -5118,12 +5120,13 @@ const Proveedores = (() => {
       const d = S.decl.get(`300-${anio}-${String(b).padStart(2, "0")}`);
       if (!d) continue;
       ultI = b;
-      const mI = modeloIva(`${anio}-${String(2 * b).padStart(2, "0")}`);
+      // Solo el movimiento de cada bimestre: un saldo pendiente que se declaró después ya se contó en su bimestre de origen.
+      const mI = modeloIva(`${anio}-${String(2 * b).padStart(2, "0")}`, { sinSaldos: b > 1 });
       if (mI.error) { iva.excl.push(b); continue; }
       iva.incl.push(b); ivaCalc.push(mI.X.R); ivaDec.push(Object.fromEntries(Object.entries(d.R).map(([k, v]) => [k, v || 0])));
     }
     iva.sig = ultI && ultI < 6 ? ultI + 1 : null;
-    const mSig = iva.sig ? modeloIva(`${anio}-${String(2 * iva.sig).padStart(2, "0")}`) : null;
+    const mSig = iva.sig ? modeloIva(`${anio}-${String(2 * iva.sig).padStart(2, "0")}`, { sinSaldos: true }) : null;
     iva.sigCalc = mSig && !mSig.error ? mSig.X.R : null;
     const RI = [28, 35, 39, 40, 41, 42, 43, 59, 67, 77, 79, 81, 85, 88];
     const ajI = Object.fromEntries(RI.map((n) => [n, sumar(ivaCalc, n) - sumar(ivaDec, n)]));
@@ -5173,7 +5176,7 @@ const Proveedores = (() => {
     A.iva.sigTxt = A.iva.sig ? `bimestre ${A.iva.sig} (${NOMBRE_BIM[A.iva.sig - 1]})` : "—";
     A.ica.sigTxt = A.ica.sig ? `bimestre ${A.ica.sig} (${NOMBRE_BIM[A.ica.sig - 1]})` : "—";
     const filas = [...sec("RETENCIÓN EN LA FUENTE (350)", A.ret, (m) => MESES[m - 1]), ...sec("IVA (300)", A.iva, (b) => NOMBRE_BIM[b - 1]), ...sec(`ICA ${S.cfg.impuestos.ica.municipio.toUpperCase()}`, A.ica, (b) => NOMBRE_BIM[b - 1])];
-    const pie = ["Retención en la fuente: «Libros» suma lo causado en cada mes (créditos de las cuentas 2365 y 2367). Si una retención de un mes se declaró después junto con otras (saldo anterior), cuenta una sola vez, en su mes de origen.", "Ajuste = libros − declarado, acumulado de los períodos ya presentados. Positivo: declarar de más en la próxima declaración; negativo (entre paréntesis): declarar de menos. Sugerido = calculado del próximo período + ajuste (los totales e impuestos se recalculan)."];
+    const pie = ["«Libros» suma lo causado en cada período: créditos de las cuentas 2365 y 2367 en la retención, y el movimiento de las cuentas de IVA del bimestre en el 300. Si un valor de un período se declaró después junto con otros (saldo anterior), cuenta una sola vez, en su período de origen.", "Ajuste = libros − declarado, acumulado de los períodos ya presentados. Positivo: declarar de más en la próxima declaración; negativo (entre paréntesis): declarar de menos. Sugerido = calculado del próximo período + ajuste (los totales e impuestos se recalculan)."];
     const excl = [[A.ret, "350", (m) => MESES[m - 1]], [A.iva, "IVA", (b) => NOMBRE_BIM[b - 1]], [A.ica, "ICA", (b) => NOMBRE_BIM[b - 1]]].filter(([X]) => X.excl.length).map(([X, t, f]) => `${t}: ${lista(X.excl, f)}`);
     if (excl.length) pie.push(`Declarados sin balance cargado (no entran en el acumulado hasta cargar el balance): ${excl.join("; ")}.`);
     if (!A.ret.sigCalc || !A.iva.sigCalc || !A.ica.sigCalc) pie.push("La columna “Sugerido” se llena cuando estén cargados los balances del próximo período.");
