@@ -2745,6 +2745,29 @@ const Bancos = (() => {
     };
     unoAUno(O.diasExacto, "exacto");
 
+    // 1b · Un abono del banco = varias facturas del MISMO cliente (mismo NIT) registradas por separado en el libro.
+    //      Al limitar la búsqueda a un solo tercero, la suma no cuadra por casualidad aunque haya muchas ventas ese día.
+    const mismoCliente = (tolDe, regla, nota) => {
+      for (const b of libres(B).sort((x, y) => Math.abs(y.valor) - Math.abs(x.valor))) {
+        if (b.par || CAT_BANCARIAS.includes(b.cat) || b.cat === "intereses") continue;
+        const tol = tolDe(b);
+        const c = libres(L).filter((l) => !l.virtual && Math.sign(l.valor) === Math.sign(b.valor) && Math.abs(l.valor) < Math.abs(b.valor) + tol && diasEntre(l.fecha, b.fecha) >= -3 && diasEntre(l.fecha, b.fecha) <= 10 && String(l.nit || "").replace(/\D/g, "").length >= 5);
+        const porNit = new Map();
+        for (const l of c) { const k = String(l.nit).replace(/\D/g, ""); if (/^(\d)\1+$/.test(k) || /CONTADO/.test(norm(l.tercero))) continue; if (!porNit.has(k)) porNit.set(k, []); porNit.get(k).push(l); }
+        let mejor = null;
+        for (const ls of porNit.values()) {
+          if (ls.length < 2) continue;
+          const xs = ls.sort((x, y) => Math.abs(diasEntre(x.fecha, b.fecha)) - Math.abs(diasEntre(y.fecha, b.fecha))).slice(0, 12);
+          const ix = subconjunto(xs.map((l) => ({ v: l.valor })), b.valor, tol, 8, 40000, 2);
+          if (!ix) continue;
+          const sel = ix.map((i) => xs[i]), d = Math.abs(sel.reduce((a, l) => a + l.valor, 0) - b.valor);
+          if (!mejor || d < mejor.d) mejor = { sel, d };
+        }
+        if (mejor) unir(mejor.sel, [b], regla, { nota: `${mejor.sel.length} facturas de ${mejor.sel[0].tercero || mejor.sel[0].nit} (${mejor.sel.map((l) => l.doc).join(" + ")}) en un solo pago${nota ? " · " + nota : ""}` });
+      }
+    };
+    mismoCliente(() => Math.max(O.tolerancia, 2), "mismo-cliente", "");
+
     // 2 · Varios del libro = un movimiento del banco, o un renglón del libro = varios del banco.
     const nitBanco = String(O.nitBanco || "").replace(/\D/g, "").slice(0, 9);
     const esDelBanco = (l) => (nitBanco && String(l.nit || "").replace(/\D/g, "").slice(0, 9) === nitBanco) || /GASTO.{0,4}BANCARI|AJUSTE AL PESO|\bGMF\b|4X1000|INTERESES Y RENDIMIENTOS/.test(norm(l.concepto));
@@ -2864,6 +2887,7 @@ const Bancos = (() => {
 
     // 6 · Valor aproximado: el cliente pagó redondeado o el banco descontó un costo pequeño.
     unoAUno(O.diasAprox, "aproximado", (l) => Math.min(O.aproxMax, Math.max(100, Math.abs(l.valor) * O.aproxPct / 100)));
+    mismoCliente((b) => Math.min(O.aproxMax, Math.max(100, Math.abs(b.valor) * O.aproxPct / 100)), "mismo-cliente-aprox", "con diferencia de valor: revisar");
 
     // 6b · Mismo tercero o documento con diferencia mayor (pagó de más o de menos): se cruza y queda para revisar.
     {
@@ -3073,7 +3097,7 @@ const Bancos = (() => {
     const banco = { cuenta: cuenta.codigo, nombre: cuenta.nombre };
     const add = (grupo, fecha, cta, detalle, deb, cre, extra = {}) => {
       if (Math.abs(deb) < 0.005 && Math.abs(cre) < 0.005) return;
-      lineas.push({ grupo, fecha, cuenta: cta.cuenta, nombreCuenta: cta.nombre, nit: extra.nit ?? nitB, tercero: extra.tercero ?? nomB, centro, detalle, debito: r2(deb), credito: r2(cre), base: r2(extra.base || 0), revisar: Boolean(extra.revisar), estimado: Boolean(extra.estimado), origen: extra.origen || [] });
+      lineas.push({ grupo, fecha, cuenta: cta.cuenta, nombreCuenta: cta.nombre, nit: extra.nit ?? nitB, tercero: extra.tercero ?? nomB, centro, detalle, debito: r2(deb), credito: r2(cre), base: r2(extra.base || 0), revisar: Boolean(extra.revisar), estimado: Boolean(extra.estimado), origen: extra.origen || [], lista: extra.lista || null });
     };
     const P = R.pendientes;
     const pend = [...P.ncNoRegistradas, ...P.ndNoRegistradas].filter((b) => !b.ant);
@@ -3095,6 +3119,7 @@ const Bancos = (() => {
       const contra = C[cat] || (total > 0 ? C.abonoSinIdentificar : C.cargoSinIdentificar);
       const revisar = !["gmf", "comision", "cuota", "iva", "intereses", "retencion"].includes(cat);
       const terc = ["gmf", "comision", "cuota", "iva", "intereses", "retencion"].includes(cat) ? {} : { nit: "", tercero: "" };
+      if (items.length > 1 && revisar) terc.lista = items.map((b) => ({ fecha: b.fecha, desc: b.desc, valor: b.valor }));
       if (total < 0) { add(gr, fecha, contra, det, -total, 0, { origen, revisar, ...terc }); add(gr, fecha, banco, det, 0, -total, { origen }); }
       else { add(gr, fecha, banco, det, total, 0, { origen }); add(gr, fecha, cat === "tarjetas" ? C.abonoSinIdentificar : contra, det, 0, total, { origen, revisar, ...terc }); }
     }
@@ -5978,7 +6003,7 @@ const Proveedores = (() => {
   const REGLAS = {
     exacto: ["Valor exacto", "ok"], grupo: ["Agrupado", "info"], "gastos-mes": ["Gastos del mes", "info"], "fecha-lejana": ["Fecha lejana", "advertencia"],
     "total-dia": ["Total del día", "info"], aproximado: ["Valor aproximado", "advertencia"], tercero: ["Mismo tercero · revisar", "advertencia"],
-    tarjetas: ["Tarjeta (neto)", "info"], bold: ["Datáfono Bold", "ok"], "tarjetas-anterior": ["Tarjeta · mes anterior", "advertencia"], anterior: ["Mes anterior", "advertencia"], manual: ["Manual", "gris"],
+    tarjetas: ["Tarjeta (neto)", "info"], bold: ["Datáfono Bold", "ok"], "mismo-cliente": ["Varias facturas, un pago", "info"], "mismo-cliente-aprox": ["Varias facturas · revisar", "advertencia"], "tarjetas-anterior": ["Tarjeta · mes anterior", "advertencia"], anterior: ["Mes anterior", "advertencia"], manual: ["Manual", "gris"],
   };
   const chipRegla = (r) => { const [t, c] = REGLAS[r] || [r, "gris"]; return `<span class="chip ${c}">${esc(t)}</span>`; };
   const NOMBRE_BANCO_NIT = { Bancolombia: "890903938", "Banco de Bogotá": "860002964", Davivienda: "860034313", BBVA: "860003020", "Banco de Occidente": "890300279", "Banco Popular": "860007738", "AV Villas": "860035827", "Banco Caja Social": "860007335" };
@@ -6497,7 +6522,7 @@ const Proveedores = (() => {
     for (const g of grupos) {
       const ls = CB.lineas.filter((l) => l.grupo === g);
       html += `<tr class="bc-gr"><td colspan="7">${esc(g)}</td></tr>`;
-      html += ls.map((l) => `<tr><td><b>${esc(l.cuenta)}</b></td><td>${esc(l.nombreCuenta)}</td><td><small>${esc(l.nit)} ${esc(l.tercero)}</small></td><td>${esc(l.centro)}</td><td class="det">${esc(l.detalle)} ${l.revisar ? '<span class="chip advertencia">Revisar</span>' : ""}${l.estimado ? ' <span class="chip info">Estimado</span>' : ""}</td><td class="num">${l.debito ? fmtC(l.debito) : ""}</td><td class="num">${l.credito ? fmtC(l.credito) : ""}</td></tr>`).join("");
+      html += ls.map((l) => `<tr><td><b>${esc(l.cuenta)}</b></td><td>${esc(l.nombreCuenta)}</td><td><small>${esc(l.nit)} ${esc(l.tercero)}</small></td><td>${esc(l.centro)}</td><td class="det">${esc(l.detalle)} ${l.revisar ? '<span class="chip advertencia">Revisar</span>' : ""}${l.estimado ? ' <span class="chip info">Estimado</span>' : ""}${l.lista ? `<details><summary class="pie">Ver los ${l.lista.length} movimientos</summary>${l.lista.map((m) => `<div><small>${fechaCorta(m.fecha)} · ${esc(m.desc)} · <b>${fmtC(m.valor)}</b></small></div>`).join("")}</details>` : ""}</td><td class="num">${l.debito ? fmtC(l.debito) : ""}</td><td class="num">${l.credito ? fmtC(l.credito) : ""}</td></tr>`).join("");
     }
     html += `<tr class="bc-totc"><td colspan="5">Sumas iguales</td><td class="num">${fmtC(CB.debitos)}</td><td class="num">${fmtC(CB.creditos)}</td></tr></tbody></table></div>
       <p class="pie">Los renglones <span class="chip advertencia">Revisar</span> van a cuentas puente (abonos por identificar, cargos por legalizar u obligaciones sin subcuenta): asigne el tercero o la subcuenta antes de registrarlos. Las cuentas contables de cada concepto se cambian en Parámetros.</p></section>`;
@@ -6505,7 +6530,7 @@ const Proveedores = (() => {
   }
   function bcCruces(z) {
     const { R } = z;
-    const orden = ["manual", "tercero", "aproximado", "tarjetas", "tarjetas-anterior", "anterior", "gastos-mes", "bold", "grupo", "total-dia", "fecha-lejana", "exacto"];
+    const orden = ["manual", "tercero", "mismo-cliente-aprox", "aproximado", "mismo-cliente", "tarjetas", "tarjetas-anterior", "anterior", "gastos-mes", "bold", "grupo", "total-dia", "fecha-lejana", "exacto"];
     const cs = R.cruces.slice().sort((a, b) => orden.indexOf(a.regla) - orden.indexOf(b.regla));
     const conteo = {}; for (const c of R.cruces) conteo[c.regla] = (conteo[c.regla] || 0) + 1;
     let html = `<section class="panel"><h2>Partidas cruzadas</h2><p class="sub">${Object.entries(conteo).map(([r, n]) => `${chipRegla(r)} ${n}`).join(" &nbsp; ")}</p>
