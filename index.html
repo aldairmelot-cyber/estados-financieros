@@ -4703,7 +4703,9 @@ const Proveedores = (() => {
     movimientos: r.movimientos.map((m) => [m.cuenta, m.doc, m.nit, m.tercero, m.base, m.debito, m.credito, m.tarifa || 0, m.concepto || ""].join("\t")) });
   const impDeDoc = (d) => ({ ...d, movimientos: (d.movimientos || []).map((l) => { const p = l.split("\t"); return { cuenta: p[0], doc: p[1], nit: p[2], tercero: p[3], base: +p[4], debito: +p[5], credito: +p[6], tarifa: +p[7], concepto: p[8] }; }) });
 
-  function liquidacion(periodo = S.periodo) {
+  /** opts.sinSaldos: liquida solo lo causado en el mes, sin sumar saldos anteriores de las cuentas de retención
+   *  (para acumulados del año: esos saldos ya se contaron en el mes en que se causaron). */
+  function liquidacion(periodo = S.periodo, opts = {}) {
     const b = S.hist.get(periodo);
     let balance = null;
     if (b) {
@@ -4723,11 +4725,12 @@ const Proveedores = (() => {
         completadas.push(...faltan.filter((c) => movs.some((m) => m.cuenta === c.cuenta) || Math.abs(c.saldoAnterior) >= 1));
       }
     }
-    let L = Impuestos.liquidar(rep, S.cfg.impuestos, balance, periodo);
+    const cfgImp = opts.sinSaldos ? { ...S.cfg.impuestos, incluirSaldoAnterior: { ...(S.cfg.impuestos.incluirSaldoAnterior || {}), [periodo]: {} } } : S.cfg.impuestos;
+    let L = Impuestos.liquidar(rep, cfgImp, balance, periodo);
     // Si el 350 presentado incluyó saldos anteriores de retención (p. ej. reteIVA de meses previos) y el usuario no ha decidido, se siguen.
     const d350 = S.decl.get(`350-${periodo}`), expl = S.cfg.impuestos.incluirSaldoAnterior?.[periodo] || {};
     const sinDecidir = (L.pendientes || []).filter((x) => !x.incluir && expl[x.cuenta] === undefined);
-    if (d350 && sinDecidir.length && d350.R[136] != null && Math.abs(L.total - d350.R[136]) >= 1000) {
+    if (!opts.sinSaldos && d350 && sinDecidir.length && d350.R[136] != null && Math.abs(L.total - d350.R[136]) >= 1000) {
       // Se prueba cada combinación de saldos pendientes (son pocos) y se queda la que más se acerca a lo declarado.
       const cands = sinDecidir.slice(0, 6);
       let mejor = null;
@@ -5096,11 +5099,13 @@ const Proveedores = (() => {
       if (!d) continue;
       ultRet = m;
       if (!S.hist.has(per)) { ret.excl.push(m); continue; }
-      ret.incl.push(m); retCalc.push(valsRet(liquidacion(per)));
+      // Solo lo causado en cada mes: un saldo anterior incluido en otra declaración ya se contó en su mes de origen.
+      // En enero sí cuentan (vienen del año anterior, que no está en este acumulado).
+      ret.incl.push(m); retCalc.push(valsRet(liquidacion(per, { sinSaldos: m > 1 })));
       retDec.push({ 59: d.R[59] || 0, 68: d.R[68] || 0, ter: (d.R[130] || 0) - (d.R[68] || 0), 130: d.R[130] || 0, 134: d.R[134] || 0, 136: d.R[136] || 0 });
     }
     ret.sig = ultRet && ultRet < 12 ? `${anio}-${String(ultRet + 1).padStart(2, "0")}` : null;
-    ret.sigCalc = ret.sig && S.hist.has(ret.sig) ? valsRet(liquidacion(ret.sig)) : null;
+    ret.sigCalc = ret.sig && S.hist.has(ret.sig) ? valsRet(liquidacion(ret.sig, { sinSaldos: true })) : null;
     ret.filas = [["Retenciones practicadas a terceros (renta)", "ter"], ["Autorretención especial – base", 59], ["Autorretención especial – valor", 68], ["Total retenciones renta y complementario", 130], ["Total retenciones de IVA (reteIVA)", 134], ["Total retenciones a pagar", 136]].map(([txt, n]) => {
       const libros = sumar(retCalc, n), decl = sumar(retDec, n), aj = libros - decl;
       const sc = ret.sigCalc ? ret.sigCalc[n] : null;
@@ -5168,7 +5173,7 @@ const Proveedores = (() => {
     A.iva.sigTxt = A.iva.sig ? `bimestre ${A.iva.sig} (${NOMBRE_BIM[A.iva.sig - 1]})` : "—";
     A.ica.sigTxt = A.ica.sig ? `bimestre ${A.ica.sig} (${NOMBRE_BIM[A.ica.sig - 1]})` : "—";
     const filas = [...sec("RETENCIÓN EN LA FUENTE (350)", A.ret, (m) => MESES[m - 1]), ...sec("IVA (300)", A.iva, (b) => NOMBRE_BIM[b - 1]), ...sec(`ICA ${S.cfg.impuestos.ica.municipio.toUpperCase()}`, A.ica, (b) => NOMBRE_BIM[b - 1])];
-    const pie = ["Ajuste = libros − declarado, acumulado de los períodos ya presentados. Positivo: declarar de más en la próxima declaración; negativo (entre paréntesis): declarar de menos. Sugerido = calculado del próximo período + ajuste (los totales e impuestos se recalculan)."];
+    const pie = ["Retención en la fuente: «Libros» suma lo causado en cada mes (créditos de las cuentas 2365 y 2367). Si una retención de un mes se declaró después junto con otras (saldo anterior), cuenta una sola vez, en su mes de origen.", "Ajuste = libros − declarado, acumulado de los períodos ya presentados. Positivo: declarar de más en la próxima declaración; negativo (entre paréntesis): declarar de menos. Sugerido = calculado del próximo período + ajuste (los totales e impuestos se recalculan)."];
     const excl = [[A.ret, "350", (m) => MESES[m - 1]], [A.iva, "IVA", (b) => NOMBRE_BIM[b - 1]], [A.ica, "ICA", (b) => NOMBRE_BIM[b - 1]]].filter(([X]) => X.excl.length).map(([X, t, f]) => `${t}: ${lista(X.excl, f)}`);
     if (excl.length) pie.push(`Declarados sin balance cargado (no entran en el acumulado hasta cargar el balance): ${excl.join("; ")}.`);
     if (!A.ret.sigCalc || !A.iva.sigCalc || !A.ica.sigCalc) pie.push("La columna “Sugerido” se llena cuando estén cargados los balances del próximo período.");
