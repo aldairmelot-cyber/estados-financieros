@@ -4906,17 +4906,19 @@ const Proveedores = (() => {
   function movBimestre(periodo) {
     const bm = Impuestos.bimestre(periodo);
     const faltan = bm.meses.filter((m) => !S.hist.has(m));
-    if (faltan.length) return { bm, error: `Faltan los balances de ${faltan.join(" y ")} para liquidar el bimestre ${bm.numero} de ${bm.anio}.` };
-    const bals = bm.meses.map((m) => S.hist.get(m));
+    // Bimestre en curso: si ya está el primer mes y falta el segundo, se liquida con lo cargado (borrador parcial).
+    const parcial = faltan.length === 1 && faltan[0] === bm.meses[1];
+    if (faltan.length && !parcial) return { bm, error: `Faltan los balances de ${faltan.map((m) => `${mesNombre(m)} ${m.slice(0, 4)}`).join(" y ")} para liquidar el bimestre ${bm.numero} de ${bm.anio}.` };
+    const bals = bm.meses.filter((m) => S.hist.has(m)).map((m) => S.hist.get(m));
     if (bals.some((b) => b.tipo !== "mensual")) return { bm, error: "El IVA y el ICA bimestral necesitan los balances mensuales de los dos meses (no acumulados)." };
     const mov = { d: (p) => bals.reduce((s, b) => s + Motor.valor(b, p, "d"), 0), c: (p) => bals.reduce((s, b) => s + Motor.valor(b, p, "c"), 0),
-      d1: (p) => Motor.valor(bals[0], p, "d"), c1: (p) => Motor.valor(bals[0], p, "c"), sa: (p) => Motor.valor(bals[0], p, "sa"), ns: (p) => Motor.valor(bals[1], p, "ns") };
+      d1: (p) => Motor.valor(bals[0], p, "d"), c1: (p) => Motor.valor(bals[0], p, "c"), sa: (p) => Motor.valor(bals[0], p, "sa"), ns: (p) => Motor.valor(bals.at(-1), p, "ns") };
     const previo = S.hist.get(Motor.periodoMas(bm.meses[0], -1));
     if (previo && previo.tipo === "mensual") { mov.dPrev = (p) => Motor.valor(previo, p, "d"); mov.cPrev = (p) => Motor.valor(previo, p, "c"); }
-    const siguiente = S.hist.get(Motor.periodoMas(bm.meses[1], 1));
+    const siguiente = parcial ? null : S.hist.get(Motor.periodoMas(bm.meses[1], 1));
     if (siguiente && siguiente.tipo === "mensual") mov.cNext = (p) => Motor.valor(siguiente, p, "c");
     const movCentro = (p, cod) => bals.reduce((s, b) => { const i = b.centros.findIndex((c) => c.codigo === cod); return s + (i < 0 ? 0 : Motor.valor(b, p, i)); }, 0);
-    return { bm, mov, movCentro };
+    return { bm, mov, movCentro, parcial, faltan };
   }
   const NOMBRE_BIM = ["enero–febrero", "marzo–abril", "mayo–junio", "julio–agosto", "septiembre–octubre", "noviembre–diciembre"];
   function modeloRenglones(clave, hoja, titulo, periodoTexto, renglones, R, pie) {
@@ -4937,8 +4939,9 @@ const Proveedores = (() => {
     pie.push(`Renglón 54 tomado de los débitos del bimestre de ${ci.comprasExcluidas.join(", ")} (compras de inventario excluido).`);
     if (!ci.exentasAparte) pie.push("Las ventas exentas se incluyen en el renglón 39 junto con las excluidas, como en la liquidación actual. Puede separarlas en el renglón 35 desde Configuración.");
     if (X.control) pie.push(Math.abs(X.control.diferencia) < 1000 ? `Control: coincide con el valor trasladado a la ${ci.cierre.join(", ")} en el cierre del bimestre ($${fmt(X.control.contable)}).` : `Control: el cierre contable trasladó $${fmt(X.control.contable)} a la ${ci.cierre.join(", ")}; diferencia $${fmt(X.control.diferencia)}.`);
+    if (m.parcial) pie.unshift(`Bimestre en curso: calculado solo con ${mesNombre(bm.meses[0])}. Falta el balance de ${mesNombre(bm.meses[1])}; cuando lo cargue se completa solo.`);
     const mod = conDeclarado(modeloRenglones("iva", "IVA 300", "Liquidación del Impuesto sobre las Ventas", periodoTexto, Impuestos.RENGLONES_IVA, X.R, pie), declDe("300", bm.anio, bm.numero));
-    mod.X = X;
+    mod.X = X; mod.parcial = m.parcial;
     return mod;
   }
   function modeloIca(periodo = S.periodo) {
@@ -4958,8 +4961,9 @@ const Proveedores = (() => {
     const pie = [`Actividad ${ci.actividad}, tarifa ${String(ci.tarifaPorMil).replace(".", ",")} por mil. Avisos y tableros ${ci.avisosPct} % del impuesto; sobretasa bomberil ${ci.bomberilPct} % del impuesto${ci.redondeoBomberil === "superior" ? ", aproximada al mil superior" : ""}.`];
     if (ci.metodo !== "ventasTotales") pie.push(`Ingresos fuera del distrito: ventas de los centros ${ci.centrosFuera.join(", ")} ($${fmt(X.ventasFuera)}). Devoluciones del distrito: sin las de esos centros ($${fmt(X.devFuera)} excluidas).`);
     pie.push(`Retenciones de ICA que le practicaron (renglón 24): ${X.origenRet === "cierre" ? `crédito de cierre a la ${ci.retenciones.join(", ")} registrado en el último mes del bimestre` : X.origenRet === "cierreSiguiente" ? `crédito de cierre a la ${ci.retenciones.join(", ")} registrado en el mes siguiente al bimestre` : `saldo de la ${ci.retenciones.join(", ")} al final del bimestre (aún no se registra el cierre)`}.`);
+    if (m.parcial) pie.unshift(`Bimestre en curso: calculado solo con ${mesNombre(bm.meses[0])}. Falta el balance de ${mesNombre(bm.meses[1])}; cuando lo cargue se completa solo.`);
     const mod = conDeclarado(modeloRenglones("ica", "ICA", "Liquidación del Impuesto de Industria y Comercio", periodoTexto, Impuestos.RENGLONES_ICA, X.R, pie), declDe("ica", bm.anio, bm.numero));
-    mod.X = X;
+    mod.X = X; mod.parcial = m.parcial;
     return mod;
   }
   function recalcIca(R, ci, opc) {
@@ -4994,7 +4998,8 @@ const Proveedores = (() => {
         extra += `<div class="aviso advertencia"><p>Con este método las ventas de los centros de fuera del distrito y sus devoluciones quedan gravadas en ${esc(ci.municipio)}. Excluyéndolas, el total a pagar sería $${fmt(alt.R[34])} (diferencia $${fmt(mod.X.R[34] - alt.R[34])}).</p></div>`;
       }
       if (mod.error) return sub + extra + modeloHTML(mod);
-      const form = S.impVista === "iva" ? form300HTML(p, mod.X) : formIcaHTML(p, mod.X);
+      if (mod.parcial) extra += `<div class="aviso advertencia"><p><b>Bimestre en curso.</b> Calculado solo con el balance de ${esc(mesNombre(bm.meses[0]))}; falta ${esc(mesNombre(bm.meses[1]))}. Es un avance: cuando cargue ese balance se completa solo. Para ver un bimestre cerrado, elija en «Corte» un mes de ese bimestre (por ejemplo, agosto para julio–agosto).</p></div>`;
+      const form = S.impVista === "iva" ? form300HTML(p, { ...mod.X, parcial: mod.parcial }) : formIcaHTML(p, { ...mod.X, parcial: mod.parcial });
       return sub + extra + form + `<details class="conf" style="background:var(--hoja)"><summary>Liquidación detallada y comparación con lo presentado</summary><div>${modeloHTML(mod)}</div></details>`;
     }
     return sub + vistaRetencion();
@@ -5030,8 +5035,8 @@ const Proveedores = (() => {
     for (let b = 1; b <= 6; b++) {
       const per = `${anio}-${String(2 * b).padStart(2, "0")}`;
       const mI = modeloIva(per), mC = modeloIca(per);
-      iva.push(mI.error ? { b, vacio: true, clave: `iva-${anio}-${b}`, declarado: dec[`iva-${anio}-${b}`] } : { b, generado: mI.X.R[67], descontable: mI.X.R[81], retenciones: mI.X.R[85], pagar: mI.X.R[88], favor: mI.X.R[89], clave: `iva-${anio}-${b}`, declarado: dec[`iva-${anio}-${b}`] });
-      ica.push(mC.error ? { b, vacio: true, clave: `ica-${anio}-${b}`, declarado: dec[`ica-${anio}-${b}`] } : { b, base: mC.X.R[16], cargo: mC.X.R[22], retenciones: mC.X.R[24], pagar: mC.X.R[34], clave: `ica-${anio}-${b}`, declarado: dec[`ica-${anio}-${b}`] });
+      iva.push(mI.error || mI.parcial ? { b, vacio: true, clave: `iva-${anio}-${b}`, declarado: dec[`iva-${anio}-${b}`] } : { b, generado: mI.X.R[67], descontable: mI.X.R[81], retenciones: mI.X.R[85], pagar: mI.X.R[88], favor: mI.X.R[89], clave: `iva-${anio}-${b}`, declarado: dec[`iva-${anio}-${b}`] });
+      ica.push(mC.error || mC.parcial ? { b, vacio: true, clave: `ica-${anio}-${b}`, declarado: dec[`ica-${anio}-${b}`] } : { b, base: mC.X.R[16], cargo: mC.X.R[22], retenciones: mC.X.R[24], pagar: mC.X.R[34], clave: `ica-${anio}-${b}`, declarado: dec[`ica-${anio}-${b}`] });
     }
     for (const x of [...ret, ...iva, ...ica]) x.form = E.fuente[x.clave] || null;
     return { anio, mesCorte, ret, iva, ica };
@@ -5164,7 +5169,7 @@ const Proveedores = (() => {
     }
     iva.sig = ultI && ultI < 6 ? ultI + 1 : null;
     const mSig = iva.sig ? modeloIva(`${anio}-${String(2 * iva.sig).padStart(2, "0")}`, { sinSaldos: true }) : null;
-    iva.sigCalc = mSig && !mSig.error ? mSig.X.R : null;
+    iva.sigCalc = mSig && !mSig.error && !mSig.parcial ? mSig.X.R : null;
     const RI = [28, 35, 39, 40, 41, 42, 43, 59, 67, 77, 79, 81, 85, 88];
     const ajI = Object.fromEntries(RI.map((n) => [n, sumar(ivaCalc, n) - sumar(ivaDec, n)]));
     let sugI = null;
@@ -5190,7 +5195,7 @@ const Proveedores = (() => {
     }
     ica.sig = ultC && ultC < 6 ? ultC + 1 : null;
     const cSig = ica.sig ? modeloIca(`${anio}-${String(2 * ica.sig).padStart(2, "0")}`) : null;
-    ica.sigCalc = cSig && !cSig.error ? cSig.X.R : null;
+    ica.sigCalc = cSig && !cSig.error && !cSig.parcial ? cSig.X.R : null;
     const RC = [8, 9, 10, 11, 14, 16, 18, 22, 24, 34];
     const ajC = Object.fromEntries(RC.map((n) => [n, sumar(icaCalc, n) - sumar(icaDec, n)]));
     let sugC = null;
@@ -5476,7 +5481,7 @@ const Proveedores = (() => {
   function form300HTML(periodo, X) {
     const bm = Impuestos.bimestre(periodo), { nit, dv } = nitDv(), d = declDe("300", bm.anio, bm.numero);
     const D = d ? { ...d.R, __f: d.formulario } : null;
-    return formListaHTML("form-300", "300", "Declaración del Impuesto sobre las Ventas – IVA", `Formulario 300 · bimestre ${bm.numero} (${NOMBRE_BIM[bm.numero - 1]}) de ${bm.anio} · borrador para transcribir`,
+    return formListaHTML("form-300", "300", "Declaración del Impuesto sobre las Ventas – IVA", `Formulario 300 · bimestre ${bm.numero} (${NOMBRE_BIM[bm.numero - 1]}) de ${bm.anio} · ${X.parcial ? "AVANCE PARCIAL, falta un mes" : "borrador para transcribir"}`,
       [[1, "Año", bm.anio], [3, "Período", bm.numero], [5, "NIT", nit], [6, "DV", dv], [11, "Razón social", S.cfg.empresa.razon, 3], [12, "Cód. Dirección seccional", S.cfg.impuestos.seccional || ""]],
       F300, X.R, D, "Periodicidad bimestral.");
   }
@@ -5486,7 +5491,7 @@ const Proveedores = (() => {
     const [cod, ...act] = String(ci.actividad || "").split(/\s*[–-]\s*/);
     const extra = `<div class="fd-sub">C. Discriminación de ingresos gravados y actividades desarrolladas</div><div class="tabla-env"><table class="fd-mat"><thead><tr><th>Código CIIU</th><th>Actividad</th><th>Ingresos gravados</th><th>Tarifa (por mil)</th><th>Impuesto</th></tr></thead>
       <tbody><tr><td>${esc(cod)}</td><td class="fd-et">${esc(act.join(" – "))}</td><td>${casillaHTML(16, X.R[16], null)}</td><td style="text-align:center">${esc(String(ci.tarifaPorMil).replace(".", ","))}</td><td>${casillaHTML(17, X.R[17], null)}</td></tr></tbody></table></div>`;
-    return formListaHTML("form-ica", "ICA", `Declaración del Impuesto de Industria y Comercio · ${ci.municipio}`, `Año gravable ${bm.anio} · período ${NOMBRE_BIM[bm.numero - 1]} (bimestre ${bm.numero}) · borrador para transcribir`,
+    return formListaHTML("form-ica", "ICA", `Declaración del Impuesto de Industria y Comercio · ${ci.municipio}`, `Año gravable ${bm.anio} · período ${NOMBRE_BIM[bm.numero - 1]} (bimestre ${bm.numero}) · ${X.parcial ? "AVANCE PARCIAL, falta un mes" : "borrador para transcribir"}`,
       [["", "Año gravable", bm.anio], ["", "Período", NOMBRE_BIM[bm.numero - 1].toUpperCase()], ["", "NIT", nit], ["", "DV", dv], ["", "Razón social", S.cfg.empresa.razon, 3], ["", "Municipio", ci.municipio]],
       FICA, X.R, D, `Avisos y tableros ${ci.avisosPct} % del impuesto; sobretasa bomberil ${ci.bomberilPct} %.`, extra);
   }
