@@ -2399,6 +2399,8 @@ const Bancos = (() => {
   /* ------------------------------------------------------------ Excel / CSV */
   /** filas: matriz (primera hoja). Detecta si es libro auxiliar o extracto por los encabezados. */
   function leerTabla(filas, archivo = "") {
+    const bold = leerPasarelaBold(filas, archivo);
+    if (bold) return bold;
     const enc = (v) => norm(v);
     let iEnc = -1, mapa = null;
     for (let i = 0; i < Math.min(filas.length, 40); i++) {
@@ -2444,6 +2446,64 @@ const Bancos = (() => {
     }
     const banco = /DAVIVIENDA/.test(nombre) ? "Davivienda" : /BANCOLOMBIA/.test(nombre) ? "Bancolombia" : /BOGOTA/.test(nombre) ? "Banco de Bogotá" : "Banco";
     return armarExtracto({ banco, cuenta: (archivo.match(/(\d{8,12})/) || [])[1] || "", tipoCta: "", desde: fs[0].slice(0, 8) + "01", hasta: finDeMes(fs.at(-1).slice(0, 7)), saldoInicial: saldoAnterior }, movs);
+  }
+
+  /* ------------------------------------------------------------ reporte de transacciones de la pasarela (Bold) */
+  /**
+   * Lee el "Reporte mensual de transacciones" de Bold (datáfono y links de pago).
+   * Cada venta trae el valor bruto, las retenciones, la comisión y el neto que Bold deposita en el banco.
+   * Devuelve { tipo:"pasarela", pasarela:"Bold", periodo, desde, hasta, txns:[…], rechazadas, totales, avisos } o null si no es ese reporte.
+   */
+  function leerPasarelaBold(filas, archivo = "") {
+    let iEnc = -1, col = null;
+    for (let i = 0; i < Math.min(filas.length, 25); i++) {
+      const f = (filas[i] || []).map((v) => norm(v));
+      if (!f.includes("ID TRANSACCION") || !f.some((t) => /^DEPOSITO EN SALDO/.test(t))) continue;
+      const ix = (re) => f.findIndex((t) => re.test(t));
+      col = { id: ix(/^ID TRANSACCION$/), fecha: ix(/^FECHA$/), op: ix(/^OPERACION$/), compra: ix(/^VALOR DE LA COMPRA$/), propina: ix(/^PROPINA$/), iva: ix(/^IVA$/), impo: ix(/^IMPOCONSUMO$/),
+        total: ix(/^VALOR TOTAL$/), rf: ix(/RETE ?FUENTE/), riva: ix(/RETE ?IVA/), rica: ix(/RETE ?ICA/), comPct: ix(/^% COMISION/), comFija: ix(/^COMISION .*FIJA/), ded: ix(/^TOTAL DEDUCCION/),
+        neto: ix(/^DEPOSITO EN SALDO/), datafono: ix(/^NOMBRE DEL DATAFONO/), aut: ix(/^CODIGO AUTORIZACION/), franq: ix(/^FRANQUICIA/), tipoT: ix(/^TIPO TARJETA/), metodo: ix(/^METODO DE PAGO/),
+        canal: ix(/^CANAL DE VENTAS/), pagador: ix(/^NOMBRE DEL PAGADOR/), docPag: ix(/^DOCUMENTO DEL PAGADOR/), tarjeta: ix(/^TARJETA$/) };
+      iEnc = i; break;
+    }
+    if (iEnc < 0 || col.neto < 0 || col.total < 0) return null;
+    const n = (fila, k) => (col[k] >= 0 ? numero(fila[col[k]]) || 0 : 0);
+    const s = (fila, k) => (col[k] >= 0 ? String(fila[col[k]] ?? "").trim() : "");
+    const txns = [], rechazadas = [], avisos = [];
+    for (const fila of filas.slice(iEnc + 1)) {
+      if (!fila || !s(fila, "id")) continue;
+      const fv = col.fecha >= 0 ? fila[col.fecha] : null;
+      const fecha = fechaLibre(fv);
+      if (!fecha) continue;
+      const hora = fv instanceof Date ? fv.toISOString().slice(11, 19) : (String(fv).match(/(\d{1,2}:\d{2}(?::\d{2})?)/) || [])[1] || "";
+      const t = { id: s(fila, "id"), fecha, hora, op: s(fila, "op"), compra: n(fila, "compra"), iva: n(fila, "iva") + n(fila, "impo"), bruto: n(fila, "total"), rf: n(fila, "rf"), riva: n(fila, "riva"), rica: n(fila, "rica"),
+        com: n(fila, "comPct"), fija: n(fila, "comFija"), ded: n(fila, "ded"), neto: n(fila, "neto"), canal: s(fila, "canal"), metodo: s(fila, "metodo"), franquicia: s(fila, "franq"), pagador: s(fila, "pagador"),
+        docPagador: s(fila, "docPag").replace(/\D/g, ""), datafono: s(fila, "datafono"), aut: s(fila, "aut") };
+      t.ded = r2(t.ded); t.neto = r2(t.neto);
+      if (!/EXITOS|APROBAD/.test(norm(t.op)) || t.neto <= 0) { rechazadas.push(t); continue; }
+      const sumaDed = r2(t.rf + t.riva + t.rica + t.com + t.fija);
+      if (Math.abs(sumaDed - t.ded) > 0.05) avisos.push(`${t.id}: las deducciones (${sumaDed.toFixed(2)}) no suman el total deducido (${t.ded.toFixed(2)}).`);
+      if (Math.abs(r2(t.bruto - t.ded) - t.neto) > 0.05) avisos.push(`${t.id}: valor total − deducciones (${r2(t.bruto - t.ded).toFixed(2)}) no es igual al depósito (${t.neto.toFixed(2)}).`);
+      txns.push(t);
+    }
+    if (!txns.length) throw new Error("Se reconoció el reporte de transacciones de Bold, pero no tiene cobros exitosos.");
+    txns.sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+    const meses = {}; txns.forEach((t) => { meses[t.fecha.slice(0, 7)] = (meses[t.fecha.slice(0, 7)] || 0) + 1; });
+    const periodo = Object.entries(meses).sort((a, b) => b[1] - a[1])[0][0];
+    const tot = (k) => r2(txns.reduce((a, t) => a + t[k], 0));
+    const empresa = String((filas.slice(0, iEnc).flat().find((v) => v != null && String(v).trim()) ?? "")).trim();
+    return { tipo: "pasarela", pasarela: "Bold", fuente: "Bold · Reporte mensual de transacciones", archivo, empresa, periodo, desde: txns[0].fecha, hasta: txns.at(-1).fecha, txns, rechazadas,
+      totales: { n: txns.length, bruto: tot("bruto"), compra: tot("compra"), iva: tot("iva"), rf: tot("rf"), riva: tot("riva"), rica: tot("rica"), com: tot("com"), fija: tot("fija"), ded: tot("ded"), neto: tot("neto") }, avisos };
+  }
+  const CAMPOS_TXN = ["id", "fecha", "hora", "op", "compra", "iva", "bruto", "rf", "riva", "rica", "com", "fija", "ded", "neto", "canal", "metodo", "franquicia", "pagador", "docPagador", "datafono", "aut"];
+  const NUM_TXN = new Set(["compra", "iva", "bruto", "rf", "riva", "rica", "com", "fija", "ded", "neto"]);
+  function pasarelaADoc(p) {
+    const { txns, rechazadas, ...cab } = p;
+    return { ...cab, rechazadas: (rechazadas || []).length, filas: txns.map((t) => CAMPOS_TXN.map((k) => limpio(t[k])).join("\t")) };
+  }
+  function pasarelaDeDoc(d) {
+    const txns = (d.filas || []).map((f) => { const p = f.split("\t"); const t = { pas: d.pasarela || "Bold" }; CAMPOS_TXN.forEach((k, i) => { t[k] = NUM_TXN.has(k) ? Number(p[i]) || 0 : p[i] || ""; }); return t; });
+    return { ...d, filas: undefined, txns };
   }
 
   /* ------------------------------------------------------------ clasificación de movimientos del banco */
@@ -2554,7 +2614,7 @@ const Bancos = (() => {
     (previo?.libro || []).forEach((m, i) => L.push({ ...m, id: "LA" + i, lado: "L", ant: true, par: undefined }));
     (previo?.banco || []).forEach((m, i) => B.push({ ...m, id: "BA" + i, lado: "B", ant: true, par: undefined, cat: m.cat || categoria(m.desc, m.valor) }));
     const porId = new Map([...L, ...B].map((x) => [x.id, x]));
-    const libres = (arr) => arr.filter((x) => !x.par);
+    const libres = (arr) => arr.filter((x) => !x.par && !x.reservado);
     const cruces = [];
     const deshechos = new Set(manual.deshacer || []);
     const clave = (ls, bs) => [...ls.map((x) => x.id), "|", ...bs.map((x) => x.id)].join(",");
@@ -2577,6 +2637,78 @@ const Bancos = (() => {
       else unir(a, b, "manual");
     }
     const marcadosAnt = (manual.anteriores || []).map((i) => porId.get(i)).filter((x) => x && !x.par);
+
+    // 0b · Datáfono / links de pago con el reporte de transacciones de la pasarela (Bold).
+    //      Cada abono del banco es la suma exacta (al centavo) de los netos de un grupo de ventas consecutivas;
+    //      cada venta se busca en el libro por su valor bruto. El descuento (retenciones + comisión) queda exacto.
+    const pasarelaR = { depositos: [], pendientesAbono: [], sinLibro: [], txns: 0 };
+    {
+      const PT = (O.pasarelas || []).filter((t) => t.neto > 0).slice().sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+      pasarelaR.txns = PT.length;
+      if (PT.length) {
+        const usadosT = new Set();
+        const esAbonoBold = (b) => b.valor > 0 && /BOLD/.test(norm(b.desc));
+        const deps = libres(B).filter(esAbonoBold).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id.localeCompare(b.id));
+        const tolC = 0.05;
+        for (const b of deps) {
+          const cand = PT.filter((t) => !usadosT.has(t.id) && t.fecha <= b.fecha && diasEntre(t.fecha, b.fecha) <= Math.max(15, O.diasTarjeta * 3));
+          let sel = null;
+          // Ventanas de ventas consecutivas (Bold deposita en orden): la primera cuyo neto suma exactamente el abono.
+          for (let j = 0; j < cand.length && !sel; j++) {
+            let s = 0;
+            for (let i = j; i < cand.length; i++) {
+              s = r2(s + cand[i].neto);
+              if (Math.abs(s - b.valor) <= tolC) { sel = cand.slice(j, i + 1); break; }
+              if (s > b.valor + tolC) break;
+            }
+          }
+          if (!sel) { const idx = subconjunto(cand.slice(-30).map((t) => ({ v: t.neto })), b.valor, tolC, 8, 80000, 1); if (idx) sel = idx.map((i) => cand.slice(-30)[i]); }
+          if (!sel) continue;
+          sel.forEach((t) => usadosT.add(t.id));
+          pasarelaR.depositos.push({ b, txns: sel });
+        }
+        // Ventas en el libro por valor bruto (el libro puede traer centavos que Bold redondea).
+        const tolV = Math.max(1, O.tolerancia);
+        const pares = [];
+        const candL = libres(L).filter((l) => l.valor > 0 && !l.virtual);
+        for (const t of PT) {
+          for (const l of candL) {
+            const dv = Math.abs(l.valor - t.bruto);
+            if (dv > tolV) continue;
+            const d = diasEntre(t.fecha, l.fecha);
+            if (d < -2 || d > 4) continue;
+            let score = 10 - Math.abs(d) * 3 - dv;
+            if (t.docPagador && t.docPagador.length >= 6 && String(l.nit || "").replace(/\D/g, "").startsWith(t.docPagador.slice(0, 9))) score += 6;
+            // Si el mismo valor entra al banco por otro medio (QR, transferencia) cerca de esa fecha, probablemente no es esta venta.
+            if (libres(B).some((b) => !esAbonoBold(b) && b.valor > 0 && Math.abs(b.valor - l.valor) <= O.tolerancia && Math.abs(diasEntre(l.fecha, b.fecha)) <= 3)) score -= 4;
+            pares.push({ t, l, score });
+          }
+        }
+        pares.sort((a, b) => b.score - a.score);
+        const tDeL = new Map(), lUsada = new Set();
+        for (const p of pares) if (!tDeL.has(p.t.id) && !lUsada.has(p.l.id)) { tDeL.set(p.t.id, p.l); lUsada.add(p.l.id); }
+        for (const dep of pasarelaR.depositos) {
+          const ls = dep.txns.map((t) => tDeL.get(t.id)).filter(Boolean);
+          const faltan = dep.txns.filter((t) => !tDeL.has(t.id));
+          const sum = (arr, k) => r2(arr.reduce((a, t) => a + t[k], 0));
+          const conL = dep.txns.filter((t) => tDeL.has(t.id));
+          const det = { n: dep.txns.length, bruto: sum(dep.txns, "bruto"), compra: sum(dep.txns, "compra"), iva: sum(dep.txns, "iva"), rf: sum(dep.txns, "rf"), riva: sum(dep.txns, "riva"), rica: sum(dep.txns, "rica"),
+            com: sum(dep.txns, "com"), fija: sum(dep.txns, "fija"), ded: sum(dep.txns, "ded"), neto: sum(dep.txns, "neto"),
+            redondeo: r2(sum(conL, "bruto") - ls.reduce((a, l) => a + l.valor, 0)), faltan: faltan.map((t) => ({ id: t.id, fecha: t.fecha, bruto: t.bruto, pagador: t.pagador, canal: t.canal })),
+            ids: dep.txns.map((t) => t.id), dias: [...new Set(dep.txns.map((t) => t.fecha))] };
+          const nota = `Bold: ${det.n} venta(s) del ${det.dias.map((d) => d.slice(8) + "/" + d.slice(5, 7)).join(", ")} · bruto ${det.bruto.toFixed(0)} − deducciones ${det.ded.toFixed(2)} = neto ${det.neto.toFixed(2)}${faltan.length ? ` · ${faltan.length} venta(s) sin registrar en libros` : ""}`;
+          if (unir(ls, [dep.b], "bold", { pasarela: "Bold", bold: det, nota })) { dep.cruce = cruces.at(-1).id; dep.det = det; dep.ls = ls; }
+          if (faltan.length) pasarelaR.sinLibro.push(...faltan.map((t) => ({ ...t, abono: dep.b.fecha })));
+        }
+        // Ventas ya cobradas por Bold cuyo abono aún no llega al banco: quedan en tránsito, identificadas.
+        for (const t of PT.filter((x) => !usadosT.has(x.id))) {
+          const l = tDeL.get(t.id);
+          if (!l && t.fecha < (extracto.desde || "")) continue; // del mes anterior y ya abonada entonces
+          if (l && !l.par) { l.reservado = true; l.notaPasarela = `Venta Bold ${t.id} · se abonará el neto ${t.neto.toFixed(2)}`; l.boldT = t.id; }
+          pasarelaR.pendientesAbono.push({ ...t, libro: l ? l.id : null, enMes: t.fecha >= (extracto.desde || "") });
+        }
+      }
+    }
 
     // 1 · Uno a uno: mismo valor (±tolerancia), fechas cercanas; prioriza documento/tercero y cercanía.
     const unoAUno = (dias, regla, tolAbs = () => O.tolerancia) => {
@@ -2623,6 +2755,12 @@ const Bancos = (() => {
     };
     grupos(O.diasGrupo);
 
+    // Descuentos de Bold que pueden ir dentro del comprobante único de gastos bancarios del mes.
+    const boldDelMes = (mes) => {
+      const deps = pasarelaR.depositos.filter((d) => d.det && d.b.fecha.slice(0, 7) === mes);
+      const dedAbon = r2(deps.reduce((a, d) => a + d.det.ded, 0));
+      return dedAbon > 0 ? [{ v: dedAbon, nota: `${deps.length} abonos del mes` }] : [];
+    };
     // 3 · Comprobante global de gastos bancarios del mes ("Valor Gasto Bancario"): suma de cargos (± intereses).
     for (const l of libres(L)) {
       const nitL = String(l.nit || "").replace(/\D/g, "").slice(0, 9);
@@ -2637,6 +2775,13 @@ const Bancos = (() => {
       let hecho = false;
       // a) Todos los cargos del mes (con o sin los intereses) en un solo comprobante
       for (const base of [cargos, cargos.concat(inter)]) if (!hecho && base.length && Math.abs(total(base) - l.valor) <= tol) hecho = unir([l], base, "gastos-mes", { nota: `${base.length} cargos bancarios del mes` });
+      if (hecho) continue;
+      // a2) Un solo comprobante con los cargos del banco y los descuentos del datáfono (retenciones y comisión de Bold)
+      const bolds = boldDelMes(mes);
+      for (const bd of bolds) for (const base of [cargos, cargos.concat(inter)]) {
+        if (hecho || !base.length) continue;
+        if (Math.abs(total(base) - bd.v - l.valor) <= tol) hecho = unir([l], base, "gastos-mes", { cubre: "tarjetas:Bold", cubreValor: bd.v, gastoUnico: true, nota: `${base.length} cargos bancarios del mes + descuentos de Bold ${bd.v.toFixed(2)} (${bd.nota}) en un solo comprobante` });
+      }
       if (hecho) continue;
       // b) Comprobantes por concepto (uno para GMF, otro para comisiones…): cualquier combinación de conceptos
       const presentes = [...new Set(cargos.map((b) => b.cat))];
@@ -2660,7 +2805,18 @@ const Bancos = (() => {
       if (hecho) continue;
       // d) Valor cercano: se cruza y la diferencia queda por ajustar
       for (const base of [cargos, cargos.concat(inter)]) {
-        if (base.length && Math.abs(total(base) - l.valor) <= Math.max(1000, Math.abs(l.valor) * 0.01)) { unir([l], base, "gastos-mes", { nota: `${base.length} cargos bancarios del mes · diferencia ${r2(total(base) - l.valor).toFixed(2)}` }); break; }
+        if (base.length && Math.abs(total(base) - l.valor) <= Math.max(1000, Math.abs(l.valor) * 0.01)) { hecho = unir([l], base, "gastos-mes", { nota: `${base.length} cargos bancarios del mes · diferencia ${r2(total(base) - l.valor).toFixed(2)}` }); break; }
+      }
+      if (hecho || !cargos.length) continue;
+      // e) Comprobante único de gastos bancarios ("Valor Gasto Bancario") que no cuadra: se cruza con la composición más cercana
+      //    (cargos del banco, con o sin los descuentos de Bold) y la diferencia queda a la vista para revisar.
+      if (!/GASTO.{0,4}BANCARI/.test(norm(l.concepto)) && !(delBanco && /GASTO|BANCARI/.test(norm(l.concepto)))) continue;
+      const opciones = [{ v: 0, nota: "" }, ...bolds].flatMap((bd) => [cargos, cargos.concat(inter)].map((base) => ({ base, bd, gap: r2(total(base) - bd.v - l.valor) })));
+      opciones.sort((a, b) => Math.abs(a.gap) - Math.abs(b.gap));
+      const m = opciones[0];
+      if (Math.abs(m.gap) <= Math.abs(l.valor) * 0.25) {
+        unir([l], m.base, "gastos-mes", { gastoUnico: true, revisarGasto: true, diferenciaGasto: r2(-m.gap), ...(m.bd.v ? { cubre: "tarjetas:Bold", cubreValor: m.bd.v } : {}),
+          nota: `Comprobante único de gastos bancarios: ${m.base.length} cargos del banco${m.bd.v ? ` + descuentos de Bold ${m.bd.v.toFixed(2)} (${m.bd.nota})` : ""} = ${(-(total(m.base) - m.bd.v)).toFixed(2)}; en libros ${(-l.valor).toFixed(2)} · diferencia ${(-m.gap).toFixed(2)}` });
       }
     }
 
@@ -2823,10 +2979,14 @@ const Bancos = (() => {
     {
       const tol = Math.max(O.tolerancia, 1);
       const porPas = new Map();
+      const yaCubre = new Set(cruces.filter((c) => c.cubre).map((c) => c.cubre));
       for (const c of cruces) if (["tarjetas", "tarjetas-anterior"].includes(c.regla) && c.dif < 0) porPas.set(c.pasarela || "Tarjetas", r2((porPas.get(c.pasarela || "Tarjetas") || 0) + c.dif));
-      const peq = cruces.filter((c) => !["tarjetas", "tarjetas-anterior", "anterior"].includes(c.regla) && Math.abs(c.dif) >= 0.005 && Math.abs(c.dif) <= (O.ajusteMax ?? 1000));
+      for (const c of cruces) if (c.regla === "bold") porPas.set("Bold", r2((porPas.get("Bold") || 0) - c.bold.ded));
+      for (const k of [...porPas.keys()]) if (yaCubre.has("tarjetas:" + k)) porPas.delete(k);
+      const sinAjuste = (c) => !["tarjetas", "tarjetas-anterior", "anterior", "bold"].includes(c.regla) && !c.gastoUnico;
+      const peq = cruces.filter((c) => sinAjuste(c) && Math.abs(c.dif) >= 0.005 && Math.abs(c.dif) <= (O.ajusteMax ?? 1000));
       const netoAj = r2(peq.reduce((s, c) => s + c.dif, 0));
-      const grandes = cruces.filter((c) => !["tarjetas", "tarjetas-anterior", "anterior"].includes(c.regla) && Math.abs(c.dif) > (O.ajusteMax ?? 1000));
+      const grandes = cruces.filter((c) => sinAjuste(c) && Math.abs(c.dif) > (O.ajusteMax ?? 1000));
       const metas = [...[...porPas].map(([p, v]) => ({ cubre: "tarjetas:" + p, v, nota: `Descuentos de ${p} ya registrados en libros` })),
         ...grandes.map((c) => ({ cubre: "dif:" + c.clave, v: c.dif, nota: "Diferencia de valor ya registrada en libros" })),
         ...(Math.abs(netoAj) >= 0.005 ? [{ cubre: "ajuste", v: netoAj, nota: "Ajuste al peso ya registrado en libros", tol: Math.max(tol, Math.min(500, Math.abs(netoAj) * 0.05)) }] : [])];
@@ -2838,7 +2998,7 @@ const Bancos = (() => {
 
     // Resultado
     const sum = (arr) => r2(arr.reduce((s, x) => s + x.valor, 0));
-    const pendL = libres(L), pendB = libres(B);
+    const pendL = L.filter((x) => !x.par), pendB = B.filter((x) => !x.par);
     const P = {
       consignacionesTransito: pendL.filter((x) => x.valor > 0), egresosPendientes: pendL.filter((x) => x.valor < 0),
       ncNoRegistradas: pendB.filter((x) => x.valor > 0), ndNoRegistradas: pendB.filter((x) => x.valor < 0),
@@ -2851,7 +3011,7 @@ const Bancos = (() => {
     const diferencia = r2(librosAjustado - bancoAjustado);
     for (const c of cruces) c.items = [...c.libro, ...c.banco].map((i) => porId.get(i));
     return {
-      opciones: O, L, B, cruces, porId, tarjetas,
+      opciones: O, L, B, cruces, porId, tarjetas, pasarela: pasarelaR,
       pendientes: P,
       saldos: { libros: saldoLibros, banco: saldoBanco, librosAjustado, bancoAjustado, inicialLibros: r2(libro.saldoAnterior), inicialBanco: r2(extracto.saldoInicial ?? 0),
         difInicial, difCruces, diferencia, nc: sum(P.ncNoRegistradas), nd: sum(P.ndNoRegistradas), transito: sum(P.consignacionesTransito), egresos: sum(P.egresosPendientes) },
@@ -2924,7 +3084,7 @@ const Bancos = (() => {
       else { add(gr, fecha, banco, det, total, 0, { origen }); add(gr, fecha, cat === "tarjetas" ? C.abonoSinIdentificar : contra, det, 0, total, { origen, revisar, ...terc }); }
     }
     // b) Descuentos en abonos de tarjetas (bruto en libros − neto del banco)
-    const cubiertos = new Set(R.cruces.filter((c) => c.regla === "ajuste-registrado").map((c) => c.cubre));
+    const cubiertos = new Set(R.cruces.filter((c) => c.cubre).map((c) => c.cubre));
     const porPas = new Map();
     for (const c of R.cruces) {
       if (!["tarjetas", "tarjetas-anterior"].includes(c.regla) || c.dif >= 0) continue;
@@ -2955,13 +3115,57 @@ const Bancos = (() => {
       if (ri) add(gr, fecha, C.tarjetaReteica, det + ` · reteICA ${T.reteica} ‰`, ri, 0, { ...t, origen, base: bruto });
       add(gr, fecha, banco, det, 0, desc, { origen, estimado: true });
     }
+    // b2) Datáfono Bold: descuentos exactos según el reporte de transacciones, ventas sin registrar y redondeo de centavos.
+    {
+      const bc = R.cruces.filter((c) => c.regla === "bold");
+      if (bc.length) {
+        const sum = (k) => r2(bc.reduce((a, c) => a + c.bold[k], 0));
+        const det = { n: sum("n"), bruto: sum("bruto"), compra: sum("compra"), rf: sum("rf"), riva: sum("riva"), rica: sum("rica"), com: sum("com"), fija: sum("fija"), ded: sum("ded"), neto: sum("neto"), redondeo: sum("redondeo") };
+        const fecha = fechaCorte || bc.at(-1).items.at(-1).fecha;
+        const origen = bc.map((c) => c.id);
+        const t = { nit: cfg.nitBold || "", tercero: "Bold.Co S.A.S", origen };
+        const res = `Bold: ${det.n} ventas, bruto ${det.bruto.toFixed(0)}, ${bc.length} abonos por ${det.neto.toFixed(2)}`;
+        if (!cubiertos.has("tarjetas:Bold")) {
+          const gr = "Datáfono Bold: descuentos según el reporte de transacciones";
+          const comTotal = r2(det.com + det.fija);
+          const comision = T.ivaComision ? r2(comTotal / (1 + T.ivaComision / 100)) : comTotal;
+          const ivaCom = r2(comTotal - comision);
+          add(gr, fecha, C.tarjetaComision, `${res} · comisión (${det.com.toFixed(2)} + fija ${det.fija.toFixed(2)})`, comision, 0, { ...t, base: det.bruto });
+          if (ivaCom) add(gr, fecha, C.tarjetaIva, `${res} · IVA incluido en la comisión (${T.ivaComision} %)`, ivaCom, 0, { ...t, base: comision });
+          add(gr, fecha, C.tarjetaRetefuente, `${res} · retención en la fuente`, det.rf, 0, { ...t, base: det.compra });
+          add(gr, fecha, C.tarjetaReteiva, `${res} · retención de IVA`, det.riva, 0, { ...t });
+          add(gr, fecha, C.tarjetaReteica, `${res} · retención de ICA`, det.rica, 0, { ...t, base: det.compra });
+          add(gr, fecha, banco, `${res} · total deducido por Bold`, 0, det.ded, { ...t });
+        }
+        const faltan = bc.flatMap((c) => c.bold.faltan);
+        if (faltan.length) {
+          const gr = "Datáfono Bold: ventas abonadas que no están en el libro";
+          for (const f of faltan) { const d = `Venta Bold ${f.id} del ${f.fecha.slice(8)}/${f.fecha.slice(5, 7)}${f.pagador ? " · " + f.pagador : ""} (${f.canal || "datáfono"})`; add(gr, fecha, banco, d, f.bruto, 0, { nit: "", tercero: "", origen }); add(gr, fecha, C.abonoSinIdentificar, d, 0, f.bruto, { nit: "", tercero: "", revisar: true, origen }); }
+        }
+        if (Math.abs(det.redondeo) >= 0.005) {
+          const gr = "Datáfono Bold: centavos entre el libro y Bold", d = `Diferencia de centavos entre las ventas del libro y el valor cobrado por Bold (${det.n} ventas)`;
+          if (det.redondeo > 0) { add(gr, fecha, banco, d, det.redondeo, 0, { nit: "", tercero: "", origen }); add(gr, fecha, C.ajusteIngreso, d, 0, det.redondeo, { nit: "", tercero: "", origen }); }
+          else { add(gr, fecha, C.ajusteGasto, d, -det.redondeo, 0, { nit: "", tercero: "", origen }); add(gr, fecha, banco, d, 0, -det.redondeo, { nit: "", tercero: "", origen }); }
+        }
+      }
+    }
+    // b3) Comprobante único de gastos bancarios registrado por un valor distinto al real: se propone solo la diferencia.
+    for (const c of R.cruces.filter((x) => x.gastoUnico)) {
+      const resto = r2(c.dif - (c.cubreValor || 0));
+      if (Math.abs(resto) < 0.005) continue;
+      const l = c.items.find((x) => x.lado === "L");
+      const gr = "Diferencia en el comprobante único de gastos bancarios", fecha = fechaCorte || l?.fecha;
+      const d = `${l?.doc || ""} registró ${(-c.valorLibro).toFixed(2)}; cargos del banco${c.cubreValor ? " + descuentos de Bold" : ""} suman ${(-c.valorBanco + (c.cubreValor || 0)).toFixed(2)}`.trim();
+      if (resto < 0) { add(gr, fecha, C.comision, d + " · falta registrar", -resto, 0, { revisar: true, origen: [c.id] }); add(gr, fecha, banco, d + " · falta registrar", 0, -resto, { origen: [c.id] }); }
+      else { add(gr, fecha, banco, d + " · registrado de más", resto, 0, { origen: [c.id] }); add(gr, fecha, C.comision, d + " · registrado de más", 0, resto, { revisar: true, origen: [c.id] }); }
+    }
     // c) Diferencias en partidas cruzadas por valor aproximado (ajuste al peso o mayor/menor valor recibido)
-    const aj = R.cruces.filter((c) => !["tarjetas", "tarjetas-anterior", "anterior", "ajuste-registrado"].includes(c.regla) && Math.abs(c.dif) >= 0.005 && !(cubiertos.has("ajuste") && Math.abs(c.dif) <= T.ajusteMax));
+    const aj = R.cruces.filter((c) => !["tarjetas", "tarjetas-anterior", "anterior", "ajuste-registrado", "bold"].includes(c.regla) && !c.gastoUnico && Math.abs(c.dif) >= 0.005 && !(cubiertos.has("ajuste") && Math.abs(c.dif) <= T.ajusteMax));
     {
       // Ajuste al peso ya registrado: si lo registrado no es exactamente el neto actual, se propone solo la diferencia.
       const reg = R.cruces.find((c) => c.regla === "ajuste-registrado" && c.cubre === "ajuste");
       if (reg) {
-        const neto = r2(R.cruces.filter((c) => !["tarjetas", "tarjetas-anterior", "anterior", "ajuste-registrado"].includes(c.regla) && Math.abs(c.dif) >= 0.005 && Math.abs(c.dif) <= T.ajusteMax).reduce((s, c) => s + c.dif, 0));
+        const neto = r2(R.cruces.filter((c) => !["tarjetas", "tarjetas-anterior", "anterior", "ajuste-registrado", "bold"].includes(c.regla) && !c.gastoUnico && Math.abs(c.dif) >= 0.005 && Math.abs(c.dif) <= T.ajusteMax).reduce((s, c) => s + c.dif, 0));
         const resto = r2(neto - reg.valorLibro), gr = "Diferencias de valor en partidas cruzadas", fecha = fechaCorte || reg.items[0].fecha;
         if (resto > 0.004) { add(gr, fecha, banco, "Diferencia en el ajuste al peso ya registrado", resto, 0, { nit: "", tercero: "" }); add(gr, fecha, C.ajusteIngreso, "Diferencia en el ajuste al peso ya registrado", 0, resto, { nit: "", tercero: "" }); }
         else if (resto < -0.004) { add(gr, fecha, C.ajusteGasto, "Diferencia en el ajuste al peso ya registrado", -resto, 0, { nit: "", tercero: "" }); add(gr, fecha, banco, "Diferencia en el ajuste al peso ya registrado", 0, -resto, { nit: "", tercero: "" }); }
@@ -2998,12 +3202,17 @@ const Bancos = (() => {
     }).filter((f) => f.n);
     const tarj = R.cruces.filter((c) => ["tarjetas", "tarjetas-anterior"].includes(c.regla) && c.dif < 0);
     const descTarj = r2(tarj.reduce((s, c) => s - c.dif, 0));
-    const cub = new Set(R.cruces.filter((c) => c.regla === "ajuste-registrado").map((c) => c.cubre));
+    const cub = new Set(R.cruces.filter((c) => c.cubre).map((c) => c.cubre));
     const descTarjPend = r2(tarj.filter((c) => !cub.has("tarjetas:" + (c.pasarela || "Tarjetas"))).reduce((s, c) => s - c.dif, 0));
+    const bc = R.cruces.filter((c) => c.regla === "bold");
+    const bold = bc.length ? { n: bc.length, ventas: bc.reduce((a, c) => a + c.bold.n, 0), ded: r2(bc.reduce((a, c) => a + c.bold.ded, 0)), registrado: cub.has("tarjetas:Bold") } : null;
+    const boldPend = bold && !bold.registrado ? bold.ded : 0;
+    const unico = R.cruces.find((c) => c.gastoUnico) || null;
+    const difUnico = unico ? r2(unico.dif - (unico.cubreValor || 0)) : 0;
     const cargos = filas.filter((f) => f.cat !== "intereses");
-    return { filas, descTarj, descTarjPend, nTarj: tarj.length,
+    return { filas, descTarj, descTarjPend, nTarj: tarj.length, bold, boldPend, unico, difUnico,
       totalCargos: r2(-cargos.reduce((s, f) => s + f.total, 0)), pendienteCargos: r2(-cargos.reduce((s, f) => s + f.pendiente, 0)),
-      intereses: filas.find((f) => f.cat === "intereses") || null, completo: filas.every((f) => !f.nPend) && descTarjPend < 1 };
+      intereses: filas.find((f) => f.cat === "intereses") || null, completo: filas.every((f) => !f.nPend) && descTarjPend < 1 && boldPend < 1 && Math.abs(difUnico) < 1 };
   }
 
   /** Partidas que quedan pendientes, en forma compacta para arrastrarlas al mes siguiente. */
@@ -3033,7 +3242,7 @@ const Bancos = (() => {
     return { ...d, filas: undefined, movimientos };
   }
 
-  return { libroADoc, libroDeDoc, extractoADoc, extractoDeDoc, pasarelaDe: pasarela, numero, renglones, leerPDF, leerTabla, leerAuxiliarPDF, leerBancolombia, leerBogota, leerGenerico, categoria, pasarela, esVentaPOS, CATEGORIAS, NOMBRE_CAT, CAT_BANCARIAS,
+  return { libroADoc, libroDeDoc, extractoADoc, extractoDeDoc, pasarelaADoc, pasarelaDeDoc, leerPasarelaBold, pasarelaDe: pasarela, numero, renglones, leerPDF, leerTabla, leerAuxiliarPDF, leerBancolombia, leerBogota, leerGenerico, categoria, pasarela, esVentaPOS, CATEGORIAS, NOMBRE_CAT, CAT_BANCARIAS,
     conciliar, comprobantes, gastosBancarios, pendientesParaSiguiente, subconjunto, diasEntre, sumarDias, finDeMes, OPC_DEF, CTAS_DEF, TARJ_DEF, norm, r2 };
 })();
 </script>
