@@ -14,9 +14,11 @@ Es un sitio estático: un solo `index.html` que se ejecuta completo en el navega
 
 ## Dónde se guardan los datos
 
-La app trae dos modos; se elige en `config.js`.
+La app trae dos modos; se elige en `config.js`. **Esta instalación usa el modo compartido** (proyecto Firebase `estados-financieros-a0e3b`).
 
-### Modo local (por defecto)
+Para dar acceso a una persona nueva: agregue su correo de Google en `firestore.rules` y en Firebase → Firestore Database → Reglas, y pulse **Publicar**.
+
+### Modo local
 
 Cada persona trabaja con los datos de su propio navegador (IndexedDB). No necesita servidor ni cuentas.
 
@@ -37,7 +39,7 @@ Todo el equipo ve y edita los mismos datos en tiempo real, con inicio de sesión
 
 La configuración de Firebase en `config.js` no es secreta; quien no esté en la lista de `firestore.rules` no puede leer ni escribir nada.
 
-Para pasar datos del modo local al compartido: respalde en modo local antes de activar Firebase. La importación al modo compartido se hace hoy con una herramienta aparte (pídala si la necesita).
+En ambos modos, los botones **Respaldar** y **Restaurar** (abajo a la derecha) descargan o cargan un archivo `.json` con toda la información. Sirven para copias de seguridad y para pasar datos de un modo a otro.
 
 ## Probar en su computador
 

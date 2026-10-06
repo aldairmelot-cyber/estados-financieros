@@ -142,18 +142,81 @@
     promesaFirebase = (async () => {
       const V = CFG.firebaseVersion || "10.12.2";
       const base = `https://www.gstatic.com/firebasejs/${V}/`;
-      await cargarScript(base + "firebase-app-compat.js");
-      await Promise.all([cargarScript(base + "firebase-auth-compat.js"), cargarScript(base + "firebase-firestore-compat.js")]);
+      try {
+        await cargarScript(base + "firebase-app-compat.js");
+        await Promise.all([cargarScript(base + "firebase-auth-compat.js"), cargarScript(base + "firebase-firestore-compat.js")]);
+      } catch (err) {
+        avisoFatal("No se pudo conectar con el servidor de datos. Revise su conexión a internet y recargue la página.");
+        throw err;
+      }
       const app = firebase.initializeApp(CFG.firebase);
       const auth = app.auth();
       const fs = app.firestore();
       try { fs.settings({ ignoreUndefinedProperties: true, merge: true }); } catch (e) { /* ya configurado */ }
       try { await fs.enablePersistence({ synchronizeTabs: true }); } catch (e) { /* sin caché sin conexión */ }
-      const usuario = await esperarSesion(auth);
-      ponerUsuario(usuario, () => auth.signOut().then(() => location.reload()));
+      const salir = () => auth.signOut().then(() => location.reload());
+      let usuario = await esperarSesion(auth);
+      // Comprobar que el correo está autorizado en las reglas antes de entregar la BD a la app.
+      for (;;) {
+        try { await fs.doc("config/general").get(); break; }
+        catch (err) {
+          if (err && err.code === "permission-denied") { await noAutorizado(usuario, auth); usuario = await esperarSesion(auth); continue; }
+          break; // sin conexión u otro error: la app mostrará su propio aviso
+        }
+      }
+      ponerUsuario(usuario, salir, envolverFirestore(fs));
       return fs;
     })();
     return promesaFirebase;
+  }
+
+  /* Colecciones que usa la app (para respaldar y restaurar en modo compartido). */
+  const COLECCIONES = ["config", "meses", "impuestos", "terceros", "declaraciones", "conciliaciones", "concLibro", "concBanco", "proveedores", "provAcuerdos"];
+  function envolverFirestore(fs) {
+    return {
+      async exportar() {
+        const out = {};
+        for (const c of COLECCIONES) {
+          const snap = await fs.collection(c).get();
+          snap.forEach((d) => { out[c + "/" + d.id] = d.data(); });
+        }
+        return out;
+      },
+      async importar(obj, reemplazar) {
+        if (reemplazar) {
+          for (const c of COLECCIONES) {
+            const snap = await fs.collection(c).get();
+            for (const d of snap.docs) if (!((c + "/" + d.id) in obj)) await d.ref.delete();
+          }
+        }
+        for (const [ruta, datos] of Object.entries(obj)) await fs.doc(ruta).set(datos);
+      },
+    };
+  }
+
+  function avisoFatal(texto) {
+    alCargar(() => {
+      estilos(); quitarPortada();
+      const d = document.createElement("div");
+      d.id = "pf-portada"; d.className = "pf-portada";
+      d.innerHTML = `<div class="pf-caja"><h2>Sin conexión</h2><p>${escapar(texto)}</p><button class="pf-btn" type="button">Recargar</button></div>`;
+      d.querySelector("button").onclick = () => location.reload();
+      document.body.appendChild(d);
+    });
+  }
+
+  function noAutorizado(usuario, auth) {
+    return new Promise((ok) => {
+      alCargar(() => {
+        estilos();
+        quitarPortada();
+        const d = document.createElement("div");
+        d.id = "pf-portada"; d.className = "pf-portada";
+        d.innerHTML = `<div class="pf-caja"><h2>Acceso no autorizado</h2><p>La cuenta <b>${escapar(usuario.email || "")}</b> no tiene permiso para ver esta información. Pida al administrador que la agregue, o entre con otra cuenta.</p><button class="pf-btn" type="button">Usar otra cuenta</button></div>`;
+        d.querySelector("button").onclick = async () => { await auth.signOut(); d.remove(); ok(); };
+        document.body.appendChild(d);
+      });
+    });
   }
 
   function esperarSesion(auth) {
@@ -197,28 +260,32 @@
   }
   function quitarPortada() { const d = document.getElementById("pf-portada"); if (d) d.remove(); }
 
-  function ponerUsuario(u, salir) {
-    alCargar(() => {
-      estilos();
-      const c = document.createElement("div"); c.className = "pf-chip";
-      c.innerHTML = `<span title="Datos compartidos en la nube">☁ ${escapar(u.email || u.displayName || "Usuario")}</span><button type="button">Salir</button>`;
-      c.querySelector("button").onclick = salir;
-      document.body.appendChild(c);
-    });
+  function ponerUsuario(u, salir, db) {
+    ponerChip(`<span title="Datos compartidos en la nube">☁ ${escapar(u.email || u.displayName || "Usuario")}</span>`, db, "en la nube (lo verá todo el equipo)", salir);
+  }
+  function ponerRespaldoLocal(db) {
+    ponerChip(`<span title="Los datos se guardan solo en este navegador">Datos en este equipo</span>`, db, "en este equipo", null);
   }
 
-  function ponerRespaldoLocal(db) {
+  /* Chip inferior: estado + Respaldar / Restaurar (+ Salir en modo compartido). */
+  function ponerChip(etiqueta, db, donde, salir) {
     alCargar(() => {
       estilos();
       const c = document.createElement("div"); c.className = "pf-chip";
-      c.innerHTML = `<span title="Los datos se guardan solo en este navegador">Datos en este equipo</span><button type="button" data-a="exp">Respaldar</button><button type="button" data-a="imp">Restaurar</button><input type="file" accept=".json,application/json" hidden>`;
+      c.innerHTML = `${etiqueta}<button type="button" data-a="exp">Respaldar</button><button type="button" data-a="imp">Restaurar</button>${salir ? '<button type="button" data-a="salir">Salir</button>' : ""}<input type="file" accept=".json,application/json" hidden>`;
       const inp = c.querySelector("input");
-      c.querySelector('[data-a="exp"]').onclick = async () => {
-        const datos = await db.exportar();
-        const f = new Date().toISOString().slice(0, 10);
-        await downloads.save({ filename: `respaldo-estados-financieros-${f}.json`, data: JSON.stringify({ app: "estados-financieros", version: 1, fecha: new Date().toISOString(), datos }) });
+      const bExp = c.querySelector('[data-a="exp"]');
+      bExp.onclick = async () => {
+        const t = bExp.textContent; bExp.disabled = true; bExp.textContent = "Preparando…";
+        try {
+          const datos = await db.exportar();
+          const f = new Date().toISOString().slice(0, 10);
+          await downloads.save({ filename: `respaldo-estados-financieros-${f}.json`, data: JSON.stringify({ app: "estados-financieros", version: 1, fecha: new Date().toISOString(), datos }) });
+        } catch (err) { alert("No se pudo generar el respaldo: " + (err.message || err)); }
+        finally { bExp.disabled = false; bExp.textContent = t; }
       };
       c.querySelector('[data-a="imp"]').onclick = () => inp.click();
+      if (salir) c.querySelector('[data-a="salir"]').onclick = salir;
       inp.onchange = async () => {
         const f = inp.files[0]; inp.value = ""; if (!f) return;
         try {
@@ -226,10 +293,11 @@
           const datos = j && j.datos ? j.datos : j;
           if (!datos || typeof datos !== "object") throw new Error("archivo sin datos");
           const n = Object.keys(datos).length;
-          const reemplazar = confirm(`El respaldo trae ${n} registros.\n\nAceptar: reemplazar todo lo que hay en este equipo.\nCancelar: combinar con lo existente.`);
+          if (!confirm(`El respaldo trae ${n} registros y se guardará ${donde}.\n\n¿Continuar?`)) return;
+          const reemplazar = confirm(`¿Borrar primero lo que ya existe ${donde}?\n\nAceptar: reemplazar todo por el respaldo.\nCancelar: combinar (el respaldo sobrescribe solo los meses y registros que trae).`);
           await db.importar(datos, reemplazar);
           alert("Respaldo restaurado.");
-        } catch (err) { alert("No se pudo leer el respaldo: " + err.message); }
+        } catch (err) { alert("No se pudo restaurar el respaldo: " + (err.message || err)); }
       };
       document.body.appendChild(c);
     });
