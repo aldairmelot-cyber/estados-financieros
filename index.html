@@ -2686,9 +2686,22 @@ const Bancos = (() => {
         }
         pares.sort((a, b) => b.score - a.score);
         const tDeL = new Map(), lUsada = new Set();
-        for (const p of pares) if (!tDeL.has(p.t.id) && !lUsada.has(p.l.id)) { tDeL.set(p.t.id, p.l); lUsada.add(p.l.id); }
+        for (const p of pares) if (!tDeL.has(p.t.id) && !lUsada.has(p.l.id)) { tDeL.set(p.t.id, [p.l]); lUsada.add(p.l.id); }
+        // Un pago de Bold que cubre varias facturas del libro (mismo pagador, o ventas del mismo día que suman el valor).
+        for (const t of PT.filter((x) => !tDeL.has(x.id))) {
+          const base = candL.filter((l) => !lUsada.has(l.id) && l.valor < t.bruto + tolV && diasEntre(t.fecha, l.fecha) >= -2 && diasEntre(t.fecha, l.fecha) <= 4);
+          const nitT = t.docPagador && t.docPagador.length >= 6 ? t.docPagador.slice(0, 9) : "";
+          const delPagador = nitT ? base.filter((l) => String(l.nit || "").replace(/\D/g, "").startsWith(nitT)) : [];
+          let sel = null;
+          if (delPagador.length >= 2) { const ix = subconjunto(delPagador.map((l) => ({ v: l.valor })), t.bruto, Math.max(2, tolV * 2), 6); if (ix) sel = ix.map((i) => delPagador[i]); }
+          if (!sel) {
+            const mismoDia = base.filter((l) => l.fecha === t.fecha).slice(0, 24);
+            if (mismoDia.length >= 2 && azar(mismoDia.length, 3, tolV, t.bruto) < 0.02) { const ix = subconjunto(mismoDia.map((l) => ({ v: l.valor })), t.bruto, tolV, 3); if (ix) sel = ix.map((i) => mismoDia[i]); }
+          }
+          if (sel) { tDeL.set(t.id, sel); sel.forEach((l) => lUsada.add(l.id)); }
+        }
         for (const dep of pasarelaR.depositos) {
-          const ls = dep.txns.map((t) => tDeL.get(t.id)).filter(Boolean);
+          const ls = dep.txns.flatMap((t) => tDeL.get(t.id) || []);
           const faltan = dep.txns.filter((t) => !tDeL.has(t.id));
           const sum = (arr, k) => r2(arr.reduce((a, t) => a + t[k], 0));
           const conL = dep.txns.filter((t) => tDeL.has(t.id));
@@ -2702,9 +2715,9 @@ const Bancos = (() => {
         }
         // Ventas ya cobradas por Bold cuyo abono aún no llega al banco: quedan en tránsito, identificadas.
         for (const t of PT.filter((x) => !usadosT.has(x.id))) {
-          const l = tDeL.get(t.id);
+          const l = (tDeL.get(t.id) || [])[0];
           if (!l && t.fecha < (extracto.desde || "")) continue; // del mes anterior y ya abonada entonces
-          if (l && !l.par) { l.reservado = true; l.notaPasarela = `Venta Bold ${t.id} · se abonará el neto ${t.neto.toFixed(2)}`; l.boldT = t.id; }
+          if (l && !l.par) { (tDeL.get(t.id) || []).forEach((x) => { x.reservado = true; x.notaPasarela = `Venta Bold ${t.id} · se abonará el neto ${t.neto.toFixed(2)}`; }); l.reservado = true; l.notaPasarela = `Venta Bold ${t.id} · se abonará el neto ${t.neto.toFixed(2)}`; l.boldT = t.id; }
           pasarelaR.pendientesAbono.push({ ...t, libro: l ? l.id : null, enMes: t.fecha >= (extracto.desde || "") });
         }
       }
@@ -2811,7 +2824,9 @@ const Bancos = (() => {
       // e) Comprobante único de gastos bancarios ("Valor Gasto Bancario") que no cuadra: se cruza con la composición más cercana
       //    (cargos del banco, con o sin los descuentos de Bold) y la diferencia queda a la vista para revisar.
       if (!/GASTO.{0,4}BANCARI/.test(norm(l.concepto)) && !(delBanco && /GASTO|BANCARI/.test(norm(l.concepto)))) continue;
-      const opciones = [{ v: 0, nota: "" }, ...bolds].flatMap((bd) => [cargos, cargos.concat(inter)].map((base) => ({ base, bd, gap: r2(total(base) - bd.v - l.valor) })));
+      // Los intereses solo se suponen netos dentro del comprobante si así cuadra exacto.
+      const opciones = [{ v: 0, nota: "" }, ...bolds].flatMap((bd) => [cargos, cargos.concat(inter)].map((base) => ({ base, bd, gap: r2(total(base) - bd.v - l.valor) })))
+        .filter((o) => o.base === cargos || Math.abs(o.gap) <= tol);
       opciones.sort((a, b) => Math.abs(a.gap) - Math.abs(b.gap));
       const m = opciones[0];
       if (Math.abs(m.gap) <= Math.abs(l.valor) * 0.25) {
