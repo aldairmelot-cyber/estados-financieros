@@ -6529,7 +6529,7 @@ const Proveedores = (() => {
     let html = `<section class="panel"><h2>Datáfono y links de pago Bold</h2><p class="sub" style="margin:0">Cada abono de Bold en el extracto es la suma exacta de los netos de las ventas que lo componen. El descuento (retenciones y comisión) sale del reporte de transacciones, no de un porcentaje estimado.</p></section>
       <div class="kpis">
         <div class="kpi"><span>Abonos de Bold cruzados</span><b>${deps.length} de ${abBold.length}</b><small>${fmtC(tot("neto"))} abonados en el banco</small></div>
-        <div class="kpi"><span>Ventas (valor bruto)</span><b>${fmtP(tot("bruto"))}</b><small>${tot("n")} ventas · ${P2.sinLibro.length ? `<b class="neg">${P2.sinLibro.length} sin registrar en libros</b>` : "todas registradas en libros"}</small></div>
+        <div class="kpi"><span>Ventas (valor bruto)</span><b>${fmtP(tot("bruto"))}</b><small>${tot("n")} ventas · ${P2.sinLibro.length ? `<span class="neg">${P2.sinLibro.length} sin registrar en libros</span>` : "todas registradas en libros"}</small></div>
         <div class="kpi"><span>Deducciones de Bold</span><b>${fmtP(tot("ded"))}</b><small>Retefuente ${fmtP(tot("rf"))} · reteIVA ${fmtP(tot("riva"))} · reteICA ${fmtP(tot("rica"))} · comisión ${fmtP(r2(tot("com") + tot("fija")))}</small></div>
         <div class="kpi"><span>Por abonar</span><b>${fmtP(P2.pendientesAbono.reduce((a, t) => a + t.neto, 0))}</b><small>${P2.pendientesAbono.length} venta(s) cobrada(s) que Bold aún no deposita</small></div>
       </div>`;
