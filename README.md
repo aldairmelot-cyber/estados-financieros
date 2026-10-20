@@ -1,6 +1,10 @@
 # Estados Financieros Districlínicas
 
-Aplicación web para generar, a partir del Libro de Inventario / Balance de prueba mensual, los estados financieros bajo NIIF para Pymes (ESF, ERI, ECP, EFE, indicadores, notas, certificación), además de impuestos, conciliaciones bancarias y cartera de proveedores.
+Aplicación web para generar, a partir del Libro de Inventario / Balance de prueba mensual, los estados financieros bajo NIIF para Pymes (ESF, ERI, ECP, EFE, indicadores, notas, certificación), además de impuestos, conciliaciones bancarias, cartera de proveedores y la verificación de la facturación electrónica de la DIAN contra el libro auxiliar.
+
+## Verificación DIAN
+
+En **Verificación DIAN → Resumen y carga de archivos** se sueltan juntos el reporte de documentos electrónicos de la DIAN (Excel, emitidos y recibidos) y el **Libro Auxiliar por Nit** de MantisWeb del mismo período. La app verifica que cada factura de venta, nota, documento soporte y factura de proveedor esté registrada con el mismo valor, IVA, tercero y mes; lista lo que falta por registrar y lo que está en el software sin soporte en la DIAN, y exporta todo a Excel. El primer cruce puede ser acumulado (enero a septiembre); luego se hace mes a mes y los pendientes se arrastran solos. El libro se procesa en el navegador; en la base de datos solo se guardan el resumen y las novedades.
 
 Es un sitio estático: un solo `index.html` que se ejecuta completo en el navegador. Los archivos contables se procesan en el equipo de quien los carga; no se suben al repositorio.
 
