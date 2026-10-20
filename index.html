@@ -358,6 +358,31 @@ table.bc-cruces td { vertical-align: top; }
 table.bc-cruces td.det div { font-size: 12.5px; line-height: 1.35; }
 table.ef.bc-fmt td.num { font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .bc-dos { grid-template-columns: minmax(0, 1fr); } .bc-barra-sel { top: 53px; } }
+/* Verificación DIAN */
+.dn-archivos { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 12px; }
+.dn-arch { border: 1px solid var(--linea); border-left: 4px solid var(--linea-fuerte); border-radius: var(--radio); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dn-arch.listo { border-left-color: var(--ok); }
+.dn-arch b { font: 700 13px/1.3 var(--f-doc); color: var(--acento); }
+.dn-arch small { color: var(--suave); overflow-wrap: anywhere; }
+.dn-filtros { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dn-filtros input[type=text] { flex: 1 1 260px; }
+.dn-seg { flex-wrap: wrap; }
+.dn-seg .chip { margin-left: 6px; }
+table.dn td { vertical-align: top; }
+table.dn td:first-child { white-space: nowrap; }
+table.dn td.nom { min-width: 180px; max-width: 280px; }
+table.dn small { color: var(--suave); display: block; font-size: 11.5px; }
+table.dn td .chip { margin: 0 2px 2px 0; }
+table.dn tr.justif td { opacity: .55; }
+table.dn tr.dn-tot td { font-weight: 700; border-top: 2px solid var(--acento); }
+table.dn td.neg { color: var(--error); }
+table.dn th.dn-grp { text-align: center; border-bottom: 1px solid var(--linea); }
+.dn-marca { font-size: 12.5px; padding: 3px 6px !important; max-width: 220px; }
+.kpi.dn-alerta { border-top-color: var(--error); }
+.kpi.dn-bien { border-top-color: var(--ok); }
+.girando { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: dn-giro .8s linear infinite; margin-right: 8px; vertical-align: -1px; }
+@keyframes dn-giro { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .girando { animation: none; } }
 </style>
 
 <div class="app">
@@ -386,6 +411,7 @@ table.ef.bc-fmt td.num { font-variant-numeric: tabular-nums; }
 <input type="file" id="archivo-bc" accept=".pdf,.xls,.xlsx,.csv" multiple hidden>
 <input type="file" id="archivo-bc-libro" accept=".pdf,.xls,.xlsx,.csv" hidden>
 <input type="file" id="archivo-pv" accept=".pdf" multiple hidden>
+<input type="file" id="archivo-dn" accept=".xlsx,.xls,.xlsm" multiple hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -3498,6 +3524,433 @@ const Proveedores = (() => {
 </script>
 <script>
 /* =====================================================================
+   VERIFICACIÓN DIAN — cruza el reporte de documentos electrónicos de la
+   DIAN (emitidos y recibidos) contra el Libro Auxiliar por NIT de
+   MantisWeb: que todo lo de la DIAN esté registrado, con el mismo valor,
+   el mismo IVA, el mismo tercero y en el mismo mes; y lo que está en el
+   software sin soporte en la DIAN.
+   Funciones puras: no tocan el DOM.
+   ===================================================================== */
+const VerifDian = (() => {
+  "use strict";
+  const r2 = (v) => Math.round(v * 100) / 100;
+
+  /* ---------------------------------------------------------- lectura
+     `extraer` es autocontenida (no usa nada de afuera) porque también se
+     ejecuta dentro de un Web Worker para no congelar la página con el
+     libro auxiliar, que puede tener cientos de miles de filas. */
+  function extraer(filas, nombre) {
+    const norm = (s) => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+    const num = (v) => { if (typeof v === "number") return v; if (v == null || v === "") return 0; const s = String(v).trim().replace(/\s/g, ""); const n = Number(/,\d{1,2}$/.test(s) ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "")); return Number.isFinite(n) ? n : 0; };
+    const iso = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const fecha = (v) => {
+      if (v == null || v === "") return "";
+      if (v instanceof Date && !isNaN(v)) return iso(v.getFullYear(), v.getMonth() + 1, v.getDate());
+      if (typeof v === "number" && v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 86400000)); return iso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()); }
+      const s = String(v).trim();
+      let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return iso(m[1], m[2], m[3]);
+      m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/); if (m) { let y = Number(m[3]); if (y < 100) y += 2000; return iso(y, m[2], m[1]); }
+      return "";
+    };
+    const txt = (v) => (v == null ? "" : String(v).replace(/\s+/g, " ").trim());
+    const buscar = (claves, maxFila) => {
+      for (let i = 0; i < Math.min(filas.length, maxFila); i++) {
+        const f = (filas[i] || []).map(norm);
+        if (claves.every((c) => f.includes(c))) return i;
+      }
+      return -1;
+    };
+
+    // Reporte DIAN (Rp_Doc): encabezado con CUFE/CUDE y Grupo.
+    let h = buscar(["cufe/cude", "folio", "grupo"], 30);
+    if (h >= 0) {
+      const enc = filas[h].map(norm), col = (n) => enc.indexOf(norm(n));
+      const C = { tipo: col("Tipo de documento"), cufe: col("CUFE/CUDE"), folio: col("Folio"), pref: col("Prefijo"), fe: col("Fecha Emisión"), nitE: col("NIT Emisor"), nomE: col("Nombre Emisor"), nitR: col("NIT Receptor"), nomR: col("Nombre Receptor"), iva: col("IVA"), rIva: col("Rete IVA"), rRenta: col("Rete Renta"), rIca: col("Rete ICA"), total: col("Total"), estado: col("Estado"), grupo: col("Grupo") };
+      if (C.folio < 0 || C.total < 0 || C.grupo < 0 || C.nitE < 0) throw new Error("El reporte de la DIAN no trae las columnas esperadas (Folio, NIT Emisor, Total, Grupo).");
+      const otrosCols = ["ICA", "IC", "INC", "Timbre", "INC Bolsas", "IN Carbono", "IN Combustibles", "IC Datos", "ICL", "INPP", "IBUA", "ICUI"].map(col).filter((i) => i >= 0);
+      const docs = [];
+      for (let i = h + 1; i < filas.length; i++) {
+        const r = filas[i]; if (!r || r[C.folio] == null || r[C.folio] === "") continue;
+        docs.push({
+          tipo: txt(r[C.tipo]), cufe: txt(r[C.cufe]), folio: txt(r[C.folio]), pref: txt(r[C.pref]), f: fecha(r[C.fe]),
+          nitE: txt(r[C.nitE]), nomE: txt(r[C.nomE]), nitR: txt(r[C.nitR]), nomR: txt(r[C.nomR]),
+          iva: num(r[C.iva]), otros: otrosCols.reduce((s, j) => s + num(r[j]), 0), rIva: num(r[C.rIva]), rRenta: num(r[C.rRenta]), rIca: num(r[C.rIca]),
+          total: num(r[C.total]), estado: txt(r[C.estado]), grupo: txt(r[C.grupo]),
+        });
+      }
+      if (!docs.length) throw new Error("El reporte de la DIAN no tiene documentos.");
+      const fs = docs.map((d) => d.f).filter(Boolean).sort();
+      return { tipo: "dian", archivo: nombre || "", docs, desde: fs[0] || "", hasta: fs[fs.length - 1] || "" };
+    }
+
+    // Libro auxiliar por NIT (MantisWeb).
+    h = buscar(["cuenta", "nit", "numero", "fecha", "debito", "credito"], 40);
+    if (h >= 0) {
+      const enc = filas[h].map(norm), col = (n) => enc.indexOf(norm(n));
+      const C = { cta: col("Cuenta"), ncta: col("nombre de Cuenta"), nit: col("Nit"), nnit: col("Nombre Nit"), num: col("Numero"), f: col("Fecha"), conc: col("Concepto"), fac: col("Factura"), obs: col("Observación"), deb: col("Debito"), cred: col("Credito") };
+      if (C.fac < 0) throw new Error("El libro auxiliar no trae la columna «Factura». Expórtelo como «Libro Auxiliar por Nit» desde MantisWeb.");
+      let desde = "", hasta = "", nitEmp = "", empresa = "", titulo = "";
+      for (let i = 0; i < h; i++) {
+        const r = filas[i] || [];
+        for (let j = 0; j < r.length; j++) {
+          const k = norm(r[j]);
+          if (k === "desde:") desde = fecha(r[j + 1]);
+          if (k === "hasta:") hasta = fecha(r[j + 1]);
+          if (k === "nit" && r[j + 1]) nitEmp = txt(r[j + 1]);
+          if (k === "empresa" && r[j + 1]) empresa = txt(r[j + 1]);
+          if (/^libro auxiliar/.test(k)) titulo = txt(r[j]);
+        }
+      }
+      const n0 = filas.length - h;
+      const cta = [], nit = [], num_ = [], f = [], conc = [], fac = [], deb = [], cred = [];
+      const nomCta = {}, nomNit = {};
+      for (let i = h + 1; i < filas.length; i++) {
+        const r = filas[i]; if (!r) continue;
+        const c = r[C.cta], n = r[C.num];
+        if (c == null || c === "" || n == null || n === "") continue;
+        const sc = String(c).trim(); if (!/^\d+$/.test(sc)) continue;
+        const sn = txt(r[C.nit]);
+        if (C.ncta >= 0 && !nomCta[sc]) nomCta[sc] = txt(r[C.ncta]);
+        if (C.nnit >= 0 && sn && !nomNit[sn]) nomNit[sn] = txt(r[C.nnit]);
+        cta.push(sc); nit.push(sn); num_.push(txt(n).toUpperCase()); f.push(fecha(r[C.f]));
+        conc.push(C.conc >= 0 ? txt(r[C.conc]) : ""); fac.push(C.fac >= 0 ? txt(r[C.fac]) : "");
+        deb.push(num(r[C.deb])); cred.push(num(r[C.cred]));
+      }
+      if (!cta.length) throw new Error("El libro auxiliar no tiene movimientos.");
+      if (!desde || !hasta) { const fs = f.filter(Boolean).sort(); desde = desde || fs[0]; hasta = hasta || fs[fs.length - 1]; }
+      return { tipo: "libro", archivo: nombre || "", titulo, nitEmp, empresa, desde, hasta, filasArchivo: n0, cta, nit, num: num_, f, conc, fac, deb, cred, nomCta, nomNit };
+    }
+    throw new Error("No se reconoce el archivo. Cargue el reporte de documentos electrónicos de la DIAN (Excel) y el «Libro Auxiliar por Nit» de MantisWeb (Excel).");
+  }
+
+  /* ---------------------------------------------------------- utilidades */
+  const nitN = (s) => String(s == null ? "" : s).split("-")[0].replace(/\D/g, "").replace(/^0+/, "");
+  const alnum = (s) => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const digitos = (s) => { const m = String(s == null ? "" : s).match(/\d+/g); return m ? m[m.length - 1].replace(/^0+/, "") : ""; };
+  const firma = (k) => { const m = String(k).match(/^([A-Z]+)(\d+)$/); return m ? `${m[1]}:${m[2].length}` : ""; };
+  const mesDe = (f) => (f ? f.slice(0, 7) : "");
+  const dias = (a, b) => (a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 86400000) : 0);
+  const soloDos = (n) => /^2+$/.test(n); // consumidor final 222222222222
+  const mismoNit = (a, b) => a === b || (soloDos(a) && soloDos(b));
+
+  const TIPO_CORTO = [
+    [/nota de cr[eé]dito/i, "NC"], [/nota de d[eé]bito/i, "ND"], [/nota de ajuste/i, "NA"], [/documento soporte/i, "DS"],
+    [/equivalente.*pos/i, "POS"], [/equivalente/i, "DE"], [/n[oó]mina/i, "NOM"], [/application response/i, "AR"], [/factura/i, "FE"],
+  ];
+  const tipoCorto = (t) => (TIPO_CORTO.find(([re]) => re.test(t)) || [, "OT"])[1];
+  const NOMBRE_TIPO = { FE: "Factura electrónica", NC: "Nota crédito", ND: "Nota débito", DS: "Documento soporte", NA: "Nota de ajuste DS", POS: "Documento equivalente POS", DE: "Documento equivalente", NOM: "Nómina electrónica", AR: "Evento (application response)", OT: "Otro" };
+  const negativo = (tc) => tc === "NC" || tc === "NA";
+
+  // Cuentas que NO son el valor de una compra: caja y bancos, cartera, anticipos,
+  // pasivos (proveedores, retenciones, impuestos) e ingresos.
+  const NO_BASE = ["11", "1305", "1310", "1330", "1355", "21", "22", "23", "24", "25", "26", "27", "28", "41", "42"];
+  const NIT_DIAN = "800197268";
+  const esBase = (c) => !NO_BASE.some((p) => c.startsWith(p));
+
+  /* ---------------------------------------------------------- índice del libro */
+  function indexar(L) {
+    const comp = new Map();
+    const n = L.cta.length;
+    for (let i = 0; i < n; i++) {
+      const k = L.num[i];
+      let c = comp.get(k);
+      if (!c) { c = { num: k, f: L.f[i], lin: [], ing: 0, iva: 0, inc: 0, nits: new Map() }; comp.set(k, c); }
+      c.lin.push(i);
+      if (L.f[i] && (!c.f || L.f[i] < c.f)) c.f = L.f[i];
+      const cta = L.cta[i], net = L.cred[i] - L.deb[i];
+      if (cta.startsWith("41")) c.ing += net;
+      else if (cta.startsWith("2408")) c.iva += net;
+      else if (cta.startsWith("2464")) c.inc += net;
+      const nn = nitN(L.nit[i]); c.nits.set(nn, (c.nits.get(nn) || 0) + 1);
+    }
+    // facturas citadas por NIT: "nit|FE39" y "nit|#39"
+    const porFac = new Map();
+    const fa = new Array(n), fd = new Array(n), nn = new Array(n);
+    for (let i = 0; i < n; i++) {
+      nn[i] = nitN(L.nit[i]); fa[i] = alnum(L.fac[i]); fd[i] = digitos(L.fac[i]);
+      if (!fa[i]) continue;
+      for (const key of [nn[i] + "|" + fa[i], fd[i] ? nn[i] + "|#" + fd[i] : null]) {
+        if (!key) continue;
+        let s = porFac.get(key); if (!s) porFac.set(key, (s = new Set()));
+        s.add(L.num[i]);
+      }
+    }
+    const porNit = new Map();
+    for (const c of comp.values()) for (const k of c.nits.keys()) { let a = porNit.get(k); if (!a) porNit.set(k, (a = [])); a.push(c.num); }
+    return { comp, porFac, porNit, fa, fd, nn };
+  }
+
+  // Valor de compra de un comprobante: base (costo, gasto, inventario, activo) + IVA descontable.
+  function valorCompra(L, I, lineas) {
+    let base = 0, iva = 0, cxp = 0;
+    for (const i of lineas) {
+      const c = L.cta[i], v = L.deb[i] - L.cred[i];
+      if (c.startsWith("2408")) iva += v;
+      else if (esBase(c)) base += v;
+      if (c.startsWith("22") || c.startsWith("2335") || c.startsWith("2380")) cxp -= v;
+    }
+    return { base: r2(base), iva: r2(iva), total: r2(base + iva), cxp: r2(cxp) };
+  }
+
+  /* ---------------------------------------------------------- conciliación */
+  function conciliar(D, L, opts = {}) {
+    const tol = Number(opts.tol) > 0 ? Number(opts.tol) : 100;
+    const nitEmp = nitN(opts.nitEmpresa || L.nitEmp || "");
+    const prev = opts.previo || null;            // última verificación guardada anterior a esta
+    const regAnt = new Set(opts.regAnteriores || []); // claves nit|doc ya registradas en períodos anteriores
+    const I = indexar(L);
+    const filas = [];
+    const usado = new Map(); // numero de comprobante → filas DIAN que lo usan
+
+    const clasif = (d, Ltot, Liva) => {
+      const dT = r2(d.tot - Ltot), dI = r2(d.iva - Liva);
+      const obs = [];
+      const aT = Math.abs(dT), aI = Math.abs(dI);
+      let est = "ok";
+      if (aT > tol || aI > tol) est = "dif";
+      else if (aT > 1 || aI > 1) est = "red";
+      if (aT > tol) obs.push("tot");
+      if (aI > tol) { obs.push(Math.abs(Liva) < 0.5 && aT <= tol ? "ivaCosto" : "iva"); }
+      return { est, dT, dI, obs };
+    };
+
+    const emitidos = [], recibidos = [], nomina = [], eventos = [];
+    for (const d of D.docs) {
+      const tc = tipoCorto(d.tipo);
+      const em = /emitid/i.test(d.grupo);
+      if (tc === "AR") { eventos.push(d); continue; }
+      if (tc === "NOM") { nomina.push(d); continue; }
+      const sg = negativo(tc) ? -1 : 1;
+      const base = { tc, cufe: d.cufe, doc: alnum(d.pref + d.folio), folio: d.folio, f: d.f, tot: r2(sg * d.total), iva: r2(sg * d.iva), otros: r2(sg * d.otros), estado: d.estado };
+      if (em && (tc === "FE" || tc === "NC" || tc === "ND")) emitidos.push({ ...base, g: "V", nit: nitN(d.nitR), nom: d.nomR });
+      else if (em) emitidos.push({ ...base, g: "C", ds: true, nit: nitN(d.nitR), nom: d.nomR });
+      else recibidos.push({ ...base, g: "C", nit: nitN(d.nitE), nom: d.nomE });
+    }
+    const firmasVenta = new Set();
+
+    // ---- documentos que emite la empresa (ventas y documento soporte): mismo número que el comprobante
+    for (const x of emitidos) {
+      let c = I.comp.get(x.doc);
+      if (!c && x.folio) c = I.comp.get(alnum(x.folio));
+      const fila = { ...x, k: x.cufe ? x.cufe.slice(0, 24) : `${x.nit}|${x.doc}`, num: "", fL: "", Ltot: 0, Liva: 0, est: "falta", obs: [] };
+      if (c) {
+        if (x.g === "V") firmasVenta.add(firma(c.num));
+        let Ltot, Liva;
+        if (x.g === "V") { Ltot = r2(c.ing + c.iva + c.inc); Liva = r2(c.iva); }
+        else { const v = valorCompra(L, I, c.lin); Ltot = v.total; Liva = v.iva; }
+        Object.assign(fila, { num: c.num, fL: c.f, Ltot, Liva }, clasif(x, Ltot, Liva));
+        const nits = [...c.nits.keys()].filter((n) => n && n !== nitEmp);
+        if (x.nit && nits.length && !nits.some((n) => mismoNit(n, x.nit))) { fila.obs.push("nit"); fila.nitL = nits[0]; }
+        if (mesDe(c.f) !== mesDe(x.f)) fila.obs.push("mes");
+        (usado.get(c.num) || usado.set(c.num, []).get(c.num)).push(fila);
+      }
+      filas.push(fila);
+    }
+
+    // ---- documentos recibidos: se buscan por NIT del proveedor + número de factura
+    const candidatos = recibidos.map((x) => {
+      let s = I.porFac.get(x.nit + "|" + x.doc), como = "exacto";
+      if (!s && x.folio && alnum(x.folio) !== x.doc) s = I.porFac.get(x.nit + "|" + alnum(x.folio));
+      if (!s) { const dg = digitos(x.folio); if (dg && dg.length >= 2) { s = I.porFac.get(x.nit + "|#" + dg); como = "digitos"; } }
+      return { x, nums: s ? [...s] : [], como };
+    });
+    // Líneas del comprobante que son de esta factura: las que la citan, las que no citan
+    // ninguna y las que citan el propio número del comprobante. Se excluyen las que citan
+    // otra factura (fletes de la transportadora, remisiones, otra factura del proveedor).
+    const lineasDe = (c, x) => {
+      const comp = I.comp.get(c), dg = digitos(x.folio), propio = alnum(c);
+      return comp.lin.filter((i) => {
+        const a = I.fa[i], d = I.fd[i];
+        if (!a || a === x.doc || (dg && d === dg)) return true;
+        return propio.endsWith(a);
+      });
+    };
+    // Se toma el valor de las líneas de la factura o el del comprobante completo, el que se
+    // acerque más al valor de la DIAN (cubre facturas citadas con números mal digitados).
+    const valorDoc = (c, x) => {
+      const comp = I.comp.get(c), sub = lineasDe(c, x);
+      const a = valorCompra(L, I, sub);
+      if (sub.length === comp.lin.length) return a;
+      const b = valorCompra(L, I, comp.lin);
+      return Math.abs(b.total - x.tot) + Math.abs(b.iva - x.iva) < Math.abs(a.total - x.tot) + Math.abs(a.iva - x.iva) ? b : a;
+    };
+
+    const sinMatch = [];
+    for (const { x, nums, como } of candidatos) {
+      const fila = { ...x, k: x.cufe ? x.cufe.slice(0, 24) : `${x.nit}|${x.doc}`, num: "", fL: "", Ltot: 0, Liva: 0, est: "falta", obs: [] };
+      filas.push(fila);
+      if (!nums.length) { sinMatch.push(fila); continue; }
+      const sg = negativo(x.tc) ? -1 : 1;
+      const vals = nums.map((n) => ({ n, f: I.comp.get(n).f, ...valorDoc(n, x) }))
+        .sort((a, b) => sg * b.total - sg * a.total);
+      const p = vals[0];
+      if (sg * p.total <= 0.5) {
+        fila.est = "sinc"; fila.num = nums.join(", "); fila.fL = p.f; fila.obs.push("pago");
+        sinMatch.push(fila);
+        continue;
+      }
+      Object.assign(fila, { num: p.n, fL: p.f, Ltot: p.total, Liva: p.iva }, clasif(x, p.total, p.iva));
+      fila.otrosNum = vals.slice(1).map((v) => v.n);
+      const dobles = vals.filter((v) => Math.abs(v.total - x.tot) <= Math.max(tol, Math.abs(x.tot) * 0.01));
+      if (dobles.length > 1) { fila.obs.push("dup"); fila.dup = dobles.map((v) => v.n); }
+      if (como === "digitos") fila.obs.push("numero");
+      if (mesDe(p.f) !== mesDe(x.f)) fila.obs.push("mes");
+      if (regAnt.has(`${x.nit}|${x.doc}`)) fila.obs.push("dupAnt");
+      for (const v of vals) if (sg * v.total > 0.5) (usado.get(v.n) || usado.set(v.n, []).get(v.n)).push(fila);
+    }
+
+    // ---- facturas que no citan número: mismo proveedor, mismo valor, fecha cercana
+    for (const fila of sinMatch) {
+      const nums = (I.porNit.get(fila.nit) || []).filter((n) => !usado.has(n));
+      let mejor = null;
+      for (const n of nums) {
+        const c = I.comp.get(n);
+        const dd = dias(fila.f, c.f); if (dd < -15 || dd > 120) continue;
+        const v = valorCompra(L, I, c.lin);
+        if (Math.abs(v.total - fila.tot) > Math.max(tol, Math.abs(fila.tot) * 0.005)) continue;
+        if (!mejor || Math.abs(dd) < Math.abs(mejor.dd)) mejor = { n, dd, f: c.f, ...v };
+      }
+      if (mejor) {
+        fila.obs = fila.obs.filter((o) => o !== "pago");
+        Object.assign(fila, { num: mejor.n, fL: mejor.f, Ltot: mejor.total, Liva: mejor.iva }, clasif(fila, mejor.total, mejor.iva));
+        fila.obs.push("aprox");
+        if (mesDe(mejor.f) !== mesDe(fila.f)) fila.obs.push("mes");
+        usado.set(mejor.n, [fila]);
+      }
+    }
+
+    // ---- facturas anuladas con nota crédito del mismo valor (ninguna de las dos se registra)
+    const pend = (f) => f.est === "falta" || f.est === "sinc";
+    for (const g of ["C", "V"]) {
+      const ncs = filas.filter((f) => f.g === g && f.tc === "NC" && pend(f));
+      for (const nc of ncs) {
+        const fe = filas.find((f) => f.g === g && f.tc === "FE" && pend(f) && !f.anulPor && f.nit === nc.nit && Math.abs(Math.abs(f.tot) - Math.abs(nc.tot)) <= 1 && f.f <= nc.f);
+        if (fe) { fe.est = nc.est = "anul"; fe.anulPor = nc.doc; nc.anula = fe.doc; }
+      }
+    }
+
+    // ---- pendientes de la verificación anterior: ¿ya se registraron en este libro?
+    const regularizadas = [], arrastre = [];
+    if (prev && Array.isArray(prev.pendientes)) {
+      for (const p of prev.pendientes) {
+        if (filas.some((f) => f.k === p.k)) continue; // el reporte de la DIAN actual ya lo trae
+        let nums = [];
+        if (p.g === "V" || p.ds) { const c = I.comp.get(p.doc); if (c) nums = [c.num]; }
+        else {
+          const s = I.porFac.get(p.nit + "|" + p.doc) || (digitos(p.folio || p.doc).length >= 2 ? I.porFac.get(p.nit + "|#" + digitos(p.folio || p.doc)) : null);
+          if (s) nums = [...s].filter((n) => !usado.has(n));
+        }
+        const sg = negativo(p.tc) ? -1 : 1;
+        const vals = nums.map((n) => { const c = I.comp.get(n); return p.g === "V" ? { n, f: c.f, total: r2(c.ing + c.iva + c.inc), iva: r2(c.iva) } : { n, f: c.f, ...valorCompra(L, I, c.lin) }; })
+          .filter((v) => sg * v.total > 0.5).sort((a, b) => sg * b.total - sg * a.total);
+        if (vals.length) {
+          const v = vals[0];
+          const r = { ...p, num: v.n, fL: v.f, Ltot: v.total, Liva: v.iva, ...clasif(p, v.total, v.iva) };
+          regularizadas.push(r);
+          usado.set(v.n, [r]);
+        } else arrastre.push({ ...p, ant: p.ant || prev.id || true });
+      }
+    }
+
+    // ---- lo que está en el software y no en la DIAN
+    const desde = D.desde, hasta = D.hasta;
+    const enRango = (f) => f && f >= desde && f <= hasta;
+    const libroVentas = [], libroCompras = [];
+    const nombres = new Map(); for (const [k, v] of Object.entries(L.nomNit)) nombres.set(nitN(k), v);
+    for (const c of I.comp.values()) {
+      if (usado.has(c.num) || !enRango(c.f)) continue;
+      const nits = [...c.nits.keys()].filter((n) => n && n !== nitEmp);
+      const nit = nits[0] || "";
+      if (firmasVenta.has(firma(c.num))) {
+        if (Math.abs(c.ing) > 0.5) libroVentas.push({ num: c.num, f: c.f, nit, nom: nombres.get(nit) || "", ing: r2(c.ing), iva: r2(c.iva), tot: r2(c.ing + c.iva + c.inc), conc: L.conc[c.lin[0]] });
+        continue;
+      }
+      if (nits.includes(NIT_DIAN)) continue; // pagos y liquidaciones de impuestos
+      const v = valorCompra(L, I, c.lin);
+      if (v.iva > 0.5 && c.lin.some((i) => L.cta[i].startsWith("2408") && L.cred[i] > 0.5)) continue; // cierre de IVA
+      if (v.iva > 0.5 || (v.cxp > 0.5 && v.base > 0.5)) {
+        const facs = [...new Set(c.lin.map((i) => L.fac[i]).filter(Boolean))];
+        const r = { num: c.num, f: c.f, nit, nom: nombres.get(nit) || "", base: v.base, iva: v.iva, tot: v.total, fac: facs.slice(0, 3).join(", "), conc: L.conc[c.lin.find((i) => L.conc[i]) ?? c.lin[0]] };
+        if (facs.some((fx) => regAnt.has(`${nit}|${alnum(fx)}`))) r.dupAnt = true;
+        libroCompras.push(r);
+      }
+    }
+    libroVentas.sort((a, b) => a.f.localeCompare(b.f) || a.num.localeCompare(b.num));
+    libroCompras.sort((a, b) => b.iva - a.iva || a.f.localeCompare(b.f));
+
+    // ---- resumen por mes (fecha de la DIAN)
+    const meses = new Map();
+    const M = (m) => { let x = meses.get(m); if (!x) meses.set(m, (x = { mes: m, vN: 0, vTot: 0, vIva: 0, vLTot: 0, vLIva: 0, vFalta: 0, cN: 0, cTot: 0, cIva: 0, cLTot: 0, cLIva: 0, cFalta: 0, cFaltaIva: 0, lvIva: 0, lcIva: 0 })); return x; };
+    for (const f of filas) {
+      const m = M(mesDe(f.f));
+      if (f.g === "V") { m.vN++; m.vTot += f.tot; m.vIva += f.iva; m.vLTot += f.Ltot; m.vLIva += f.Liva; if (pend(f)) m.vFalta++; }
+      else { m.cN++; m.cTot += f.tot; m.cIva += f.iva; m.cLTot += f.Ltot; m.cLIva += f.Liva; if (pend(f)) { m.cFalta++; m.cFaltaIva += f.iva; } }
+    }
+    for (const r of libroVentas) M(mesDe(r.f)).lvIva += r.iva;
+    for (const r of libroCompras) M(mesDe(r.f)).lcIva += r.iva;
+    const listaMeses = [...meses.values()].filter((m) => m.mes).sort((a, b) => a.mes.localeCompare(b.mes))
+      .map((m) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, typeof v === "number" ? r2(v) : v])));
+
+    // ---- nómina electrónica (informativo)
+    const nom = new Map();
+    for (const d of nomina) { const m = mesDe(d.f); const x = nom.get(m) || { mes: m, n: 0, total: 0 }; x.n++; x.total = r2(x.total + d.total); nom.set(m, x); }
+
+    const cuenta = (g, pred) => filas.filter((f) => f.g === g && pred(f));
+    const suma = (xs, k) => r2(xs.reduce((s, x) => s + (x[k] || 0), 0));
+    const resumen = {};
+    for (const g of ["V", "C"]) {
+      const todos = cuenta(g, () => true), pe = todos.filter(pend);
+      resumen[g] = {
+        n: todos.length, tot: suma(todos, "tot"), iva: suma(todos, "iva"),
+        ok: todos.filter((f) => f.est === "ok" || f.est === "red").length,
+        dif: todos.filter((f) => f.est === "dif").length,
+        red: todos.filter((f) => f.est === "red").length,
+        falta: pe.length, faltaTot: suma(pe, "tot"), faltaIva: suma(pe, "iva"),
+        anul: todos.filter((f) => f.est === "anul").length,
+        mes: todos.filter((f) => f.obs.includes("mes")).length,
+        nit: todos.filter((f) => f.obs.includes("nit")).length,
+        dup: todos.filter((f) => f.obs.includes("dup") || f.obs.includes("dupAnt")).length,
+        aprox: todos.filter((f) => f.obs.includes("aprox")).length,
+        Ltot: suma(todos, "Ltot"), Liva: suma(todos, "Liva"),
+      };
+    }
+    resumen.libroVentas = { n: libroVentas.length, tot: suma(libroVentas, "tot"), iva: suma(libroVentas, "iva") };
+    resumen.libroCompras = { n: libroCompras.length, tot: suma(libroCompras, "tot"), iva: suma(libroCompras, "iva") };
+    resumen.eventos = eventos.length; resumen.nomina = nomina.length;
+    resumen.regularizadas = regularizadas.length; resumen.arrastre = arrastre.length;
+
+    return {
+      desde, hasta, libroDesde: L.desde, libroHasta: L.hasta, tol,
+      filas, libroVentas, libroCompras, meses: listaMeses, nomina: [...nom.values()].sort((a, b) => a.mes.localeCompare(b.mes)),
+      regularizadas, arrastre, resumen,
+    };
+  }
+
+  /* ---------------------------------------------------------- validación de los archivos antes de cruzar */
+  function validar(D, L, nitEmpresa) {
+    const av = [];
+    const ne = nitN(nitEmpresa);
+    if (L && ne && L.nitEmp && nitN(L.nitEmp) !== ne) av.push(["error", `El libro auxiliar es de otra empresa (NIT ${L.nitEmp}).`]);
+    if (D && ne) {
+      const emis = D.docs.filter((d) => /emitid/i.test(d.grupo));
+      if (emis.length && !emis.some((d) => nitN(d.nitE) === ne)) av.push(["error", "El reporte de la DIAN no corresponde al NIT de la empresa."]);
+    }
+    if (D && L) {
+      if (L.desde > D.desde || L.hasta < D.hasta) av.push(["advertencia", `El libro va del ${L.desde} al ${L.hasta} y el reporte de la DIAN del ${D.desde} al ${D.hasta}: lo que quede por fuera del libro saldrá como no registrado.`]);
+      else if (L.desde.slice(0, 7) !== D.desde.slice(0, 7) || L.hasta.slice(0, 7) !== D.hasta.slice(0, 7)) av.push(["info", `El libro cubre del ${L.desde} al ${L.hasta}; el reporte de la DIAN del ${D.desde} al ${D.hasta}.`]);
+      if (L.titulo && !/nit/i.test(L.titulo)) av.push(["advertencia", `El libro dice «${L.titulo}». Se espera el «Libro Auxiliar por Nit».`]);
+    }
+    return av;
+  }
+
+  // Identificador del período: "2026-01_2026-09" o "2026-10".
+  const idPeriodo = (desde, hasta) => (mesDe(desde) === mesDe(hasta) ? mesDe(desde) : `${mesDe(desde)}_${mesDe(hasta)}`);
+
+  return { extraer, conciliar, validar, indexar, valorCompra, idPeriodo, tipoCorto, NOMBRE_TIPO, nitN, alnum, digitos, mesDe };
+})();
+</script>
+<script>
+/* =====================================================================
    INTERFAZ — pestañas, histórico en línea, estados, exportación.
    ===================================================================== */
 (() => {
@@ -3673,7 +4126,7 @@ const Proveedores = (() => {
     db: null, dbListo: false, cargando: true, confirmar: null, sedeVista: "mes", borrador: null, sucio: false,
   };
   const TABS = [["inicio", "Panel"], ["cargar", "Cargar archivo"], ["revision", "Revisión"], ["esf", "Situación financiera"], ["eri", "Resultados"],
-    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["config", "Configuración"]];
+    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["dian", "Verificación DIAN"], ["config", "Configuración"]];
 
   const ICO = {
     inicio: '<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/>',
@@ -3682,6 +4135,7 @@ const Proveedores = (() => {
     impuestos: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
     cartera: '<path d="M3 7h18v12H3z"/><path d="M3 11h18M16 15h2"/>',
     datos: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
+    dian: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
     bancos: '<path d="M3 10h18L12 4z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
   };
   const icono = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICO[k]}</svg>`;
@@ -3691,6 +4145,7 @@ const Proveedores = (() => {
     { g: "Informes financieros", ico: "informes", items: [["esf", "Situación financiera"], ["eri", "Resultados integrales"], ["ecp", "Cambios en el patrimonio"], ["efe", "Flujos de efectivo"], ["notas", "Notas a los estados"], ["ind", "Indicadores financieros"], ["dictamen", "Dictamen del revisor fiscal"], ["exportar", "Paquete completo (PDF/Excel)"]] },
     { g: "Gestión", ico: "gestion", items: [["sede:lineal", "Resultados por sede mes a mes"], ["sede:mes", "Resultados por sede · mes"], ["sede:acum", "Resultados por sede · año"]] },
     { g: "Impuestos", ico: "impuestos", items: [["impuestos:ret", "Retención en la fuente (350)"], ["impuestos:iva", "IVA (300)"], ["impuestos:ica", "Industria y comercio (ICA)"], ["impuestos:res:anio", "Resumen del año"], ["impuestos:res:conc", "Conciliación de ingresos"], ["impuestos:res:comp", "Ajustes próxima declaración"], ["impuestos:res:renta", "Proyección de renta"]] },
+    { g: "Verificación DIAN", ico: "dian", items: [["dian:resumen", "Resumen y carga de archivos"], ["dian:pendientes", "Por registrar en el software"], ["dian:diferencias", "Diferencias de valor e IVA"], ["dian:libros", "En el software sin la DIAN"], ["dian:detalle", "Consultar documentos"]] },
     { g: "Tesorería", ico: "bancos", items: [["bancos:resumen", "Conciliaciones bancarias"], ["bancos:cargar", "Cargar libro y extracto"], ["bancos:config", "Parámetros de conciliación"]] },
     { g: "Cartera y proveedores", ico: "cartera", items: [["terceros:cxc", "Cuentas por cobrar"], ["terceros:cxp", "Cuentas por pagar"], ["prov", "Proveedores por pagar (vencimientos)"]] },
     { g: "Datos", ico: "datos", items: [["cargar", "Cargar archivos"], ["revision", "Revisión del balance"], ["config", "Configuración"]] },
@@ -3700,6 +4155,7 @@ const Proveedores = (() => {
     if (S.tab === "terceros") return `terceros:${S.terVer || "cxc"}`;
     if (S.tab === "sede") return `sede:${S.sedeVista || "mes"}`;
     if (S.tab === "bancos") return `bancos:${S.bc.vista === "detalle" ? "resumen" : S.bc.vista}`;
+    if (S.tab === "dian") return `dian:${S.dn.vista}`;
     return S.tab;
   }
   function navegar(dest) {
@@ -3709,6 +4165,7 @@ const Proveedores = (() => {
     if (tab === "impuestos" && a) { S.impVista = a; if (b) S.resVista = b; }
     if (tab === "terceros" && a) S.terVer = a;
     if (tab === "sede" && a) S.sedeVista = a;
+    if (tab === "dian" && a) { S.dn.vista = a; S.dn.confirmar = null; S.dn.limite = 300; }
     if (tab === "bancos" && a) { S.bc.vista = a; S.bc.confirmar = null; if (a === "config") { S.bc.borrador = null; S.bc.sucio = false; } }
     $(".app")?.classList.remove("menu-abierto");
     ir(tab);
@@ -5808,7 +6265,7 @@ const Proveedores = (() => {
     if (S.cargando) { v.innerHTML = '<section class="panel"><p class="vacio">Cargando el histórico…</p></section>'; return; }
     let D = null;
     try { D = calcular(); } catch (err) { console.error(err); }
-    const vistas = { prov: () => vistaProveedores(), bancos: () => vistaBancos(), inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
+    const vistas = { dian: () => vistaDian(), prov: () => vistaProveedores(), bancos: () => vistaBancos(), inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
     try { v.innerHTML = (vistas[S.tab] || vistaInicio)(D); } catch (err) {
       console.error(err);
       v.innerHTML = `<div class="aviso error"><p>No se pudo mostrar esta sección: ${esc(err.message)}</p></div>`;
@@ -7401,6 +7858,465 @@ const Proveedores = (() => {
     return guardarArchivo(nombre, data);
   }
 
+  /* ------------------------------------------------------------ verificación DIAN (reporte DIAN vs libro auxiliar) */
+  const DN = {
+    vista: "resumen", dian: null, libro: null, R: null, guardadas: new Map(), sel: null, ocupado: "", error: "", avisos: [],
+    marcas: {}, cfg: { tol: 100 }, filtro: "", fGrupo: "", fMes: "", fRev: "", fDif: "", fEst: "", confirmar: null, limite: 300, h: null,
+  };
+  S.dn = DN;
+  const URLS_XLSX = ["https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js", "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js", "https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"];
+  const PEND_DN = (f) => f.est === "falta" || f.est === "sinc";
+  const NOVEDAD_DN = (f) => f.est === "dif" || f.est === "red" || (f.obs || []).some((o) => o !== "pago");
+  const EST_DN = { ok: ["Cuadra", "ok"], red: ["Redondeo", "gris"], dif: ["Diferencia", "error"], falta: ["No registrada", "error"], sinc: ["Sin causación", "error"], anul: ["Anulada con nota crédito", "gris"] };
+  const OBS_DN = {
+    tot: ["Valor distinto", "error"], iva: ["IVA distinto", "error"], ivaCosto: ["IVA no descontado", "advertencia"], nit: ["Tercero distinto", "advertencia"],
+    mes: ["Registrada en otro mes", "info"], dup: ["Posible doble registro", "error"], dupAnt: ["Registrada en un período anterior", "error"],
+    aprox: ["Sin número de factura en el libro", "info"], numero: ["Número de factura incompleto", "info"], pago: ["Solo pagos o anticipos", "advertencia"],
+  };
+  const FILTROS_DIF = [["", "Todas"], ["valor", "Valor o IVA"], ["ivaCosto", "IVA no descontado"], ["red", "Redondeo"], ["nit", "Tercero"], ["mes", "Otro mes"], ["dup", "Doble registro"], ["aprox", "Sin número"]];
+  const MARCAS_DN = [["", "Pendiente"], ["proximo", "Se registra el próximo mes"], ["rechazada", "Rechazada / reclamada al proveedor"], ["noaplica", "No es de la empresa"], ["revisado", "Revisado: no requiere registro"]];
+  const JUSTIFICA = new Set(["rechazada", "noaplica", "revisado"]);
+  const justificada = (f) => JUSTIFICA.has(DN.marcas[f.k]?.e);
+  const grupoTxt = (g) => (g === "V" ? "Venta" : "Compra");
+  const tipoTxt = (f) => (f.ds ? (f.tc === "NA" ? "Nota ajuste DS" : "Documento soporte") : VerifDian.NOMBRE_TIPO[f.tc] || f.tc);
+  function textoPer(id) {
+    if (!id) return "";
+    const [a, b] = String(id).split("_");
+    if (!b) return mesTexto(a);
+    return a.slice(0, 4) === b.slice(0, 4) ? `${MESES_BC[Number(a.slice(5, 7)) - 1]} a ${mesTexto(b)}` : `${mesTexto(a)} a ${mesTexto(b)}`;
+  }
+
+  /* ---------- lectura de los archivos (en segundo plano: el libro puede tener cientos de miles de filas) */
+  async function leerSinHilo(file) {
+    await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
+    if (!window.XLSX) throw new Error("No se pudo cargar el lector de Excel (bloqueado por la red). Recargue la página e intente de nuevo.");
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array", dense: true });
+    const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null, blankrows: false });
+    return VerifDian.extraer(filas, file.name);
+  }
+  function leerEnHilo(file) {
+    return new Promise((ok, mal) => {
+      let w = null, url = null;
+      const respaldo = () => { try { w && w.terminate(); } catch { /* */ } if (url) URL.revokeObjectURL(url); leerSinHilo(file).then(ok, mal); };
+      try {
+        const src = `self.onmessage = (e) => { try {
+            if (!self.XLSX) for (const u of ${JSON.stringify(URLS_XLSX)}) { try { importScripts(u); } catch (_) {} if (self.XLSX) break; }
+            if (!self.XLSX) { self.postMessage({ ok: false, sinLector: true }); return; }
+            const wb = XLSX.read(new Uint8Array(e.data.buf), { type: "array", dense: true });
+            const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null, blankrows: false });
+            const extraer = ${VerifDian.extraer.toString()};
+            self.postMessage({ ok: true, r: extraer(filas, e.data.nombre) });
+          } catch (err) { self.postMessage({ ok: false, error: String((err && err.message) || err) }); } };`;
+        url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+        w = new Worker(url);
+        w.onmessage = (e) => {
+          if (e.data.sinLector) return respaldo();
+          w.terminate(); URL.revokeObjectURL(url);
+          if (e.data.ok) ok(e.data.r); else mal(new Error(e.data.error));
+        };
+        w.onerror = (e) => { if (e.preventDefault) e.preventDefault(); respaldo(); };
+        file.arrayBuffer().then((buf) => w.postMessage({ buf, nombre: file.name }, [buf]), mal);
+      } catch { respaldo(); }
+    });
+  }
+  async function leerArchivosDian(files) {
+    DN.error = ""; DN.confirmar = null;
+    const xs = files.filter((f) => /\.(xlsx|xls|xlsm)$/i.test(f.name));
+    if (!xs.length) { DN.error = "Cargue los archivos en Excel (.xlsx): el reporte de la DIAN y el Libro Auxiliar por Nit."; return render(); }
+    for (const f of xs) {
+      DN.ocupado = `Leyendo ${f.name}${f.size > 4e6 ? ` (${(f.size / 1e6).toFixed(0)} MB: puede tardar hasta un minuto)` : ""}…`; render();
+      try {
+        const r = await leerEnHilo(f);
+        if (r.tipo === "dian") DN.dian = r; else DN.libro = r;
+      } catch (err) { DN.error = `${f.name}: ${err.message}`; }
+    }
+    DN.ocupado = "";
+    if (DN.dian && DN.libro) { DN.vista = "resumen"; await verificar(true); }
+    else render();
+  }
+
+  /* ---------- cruce y guardado */
+  const anteriores = (desde) => [...DN.guardadas.values()].filter((g) => g.hasta && g.hasta < desde).sort((a, b) => a.hasta.localeCompare(b.hasta));
+  async function verificar(guardar) {
+    DN.avisos = VerifDian.validar(DN.dian, DN.libro, S.cfg.empresa.nit);
+    if (DN.avisos.some(([t]) => t === "error")) { DN.R = null; return render(); }
+    DN.ocupado = "Cruzando el reporte de la DIAN con el libro auxiliar…"; render();
+    await new Promise((r) => setTimeout(r, 40));
+    try {
+      const ants = anteriores(DN.dian.desde), prev = ants.at(-1) || null;
+      const R = VerifDian.conciliar(DN.dian, DN.libro, { tol: DN.cfg.tol, nitEmpresa: S.cfg.empresa.nit, previo: prev, regAnteriores: ants.flatMap((g) => g.reg || []) });
+      R.id = VerifDian.idPeriodo(R.desde, R.hasta); R.previo = prev ? prev.id : null;
+      R.archivos = { dian: DN.dian.archivo, libro: DN.libro.archivo, nDian: DN.dian.docs.length, nLibro: DN.libro.cta.length };
+      R.cargado = new Date().toISOString();
+      DN.R = R; DN.sel = R.id;
+      if (guardar) await guardarVerif(R);
+    } catch (err) { console.error(err); DN.error = `No se pudo hacer el cruce: ${err.message}`; }
+    DN.ocupado = ""; render();
+  }
+  const compactaDN = (f) => {
+    const o = { k: f.k, g: f.g, tc: f.tc, doc: f.doc, folio: f.folio || "", f: f.f, nit: f.nit, nom: f.nom, tot: f.tot, iva: f.iva, num: f.num || "", fL: f.fL || "", Ltot: f.Ltot || 0, Liva: f.Liva || 0, est: f.est, obs: f.obs || [], dT: f.dT || 0, dI: f.dI || 0 };
+    for (const c of ["nitL", "ant", "ds", "dup", "anulPor", "anula"]) if (f[c]) o[c] = f[c];
+    return o;
+  };
+  function aDocVerif(R) {
+    const T = 2500;
+    const doc = {
+      id: R.id, desde: R.desde, hasta: R.hasta, libroDesde: R.libroDesde, libroHasta: R.libroHasta, tol: R.tol, cargado: R.cargado, archivos: R.archivos, previo: R.previo,
+      resumen: R.resumen, meses: R.meses, nomina: R.nomina, nFilas: R.filas.length,
+      pendientes: [...R.filas.filter(PEND_DN), ...R.arrastre].map(compactaDN).slice(0, T),
+      novedades: R.filas.filter((f) => !PEND_DN(f) && f.est !== "anul" && NOVEDAD_DN(f)).map(compactaDN).slice(0, T),
+      anuladas: R.filas.filter((f) => f.est === "anul").map(compactaDN).slice(0, T),
+      regularizadas: R.regularizadas.map(compactaDN).slice(0, T),
+      libroVentas: R.libroVentas.slice(0, T), libroCompras: R.libroCompras.slice(0, T),
+      reg: R.filas.filter((f) => f.g === "C" && !f.ds && !PEND_DN(f) && f.est !== "anul").map((f) => `${f.nit}|${f.doc}`),
+    };
+    // Un documento de Firestore admite hasta 1 MB: si no cabe, se recortan las listas más largas.
+    let d = clon(doc);
+    for (const k of ["libroCompras", "novedades", "libroVentas", "anuladas"]) {
+      if (JSON.stringify(d).length < 900000) break;
+      d[k] = d[k].slice(0, Math.floor(d[k].length / 4)); d.recortado = true;
+    }
+    return d;
+  }
+  async function guardarVerif(R) {
+    const doc = aDocVerif(R);
+    DN.guardadas.set(R.id, doc);
+    if (!S.db) return;
+    try { await S.db.doc("verifDian/" + R.id).set(doc); toast(`Verificación de ${textoPer(R.id)} guardada.`); }
+    catch (err) { toast(`No se pudo guardar la verificación: ${err.message || err.code}`); }
+  }
+  async function borrarVerif(id) {
+    DN.confirmar = null;
+    if (S.db) { try { await S.db.doc("verifDian/" + id).delete(); } catch (err) { toast(`No se pudo eliminar: ${err.message || err.code}`); return; } }
+    DN.guardadas.delete(id);
+    if (DN.R && DN.R.id === id) DN.R = null;
+    if (DN.sel === id) DN.sel = null;
+    toast(`Verificación de ${textoPer(id)} eliminada.`); render();
+  }
+  async function marcarDN(k, e) {
+    const m = { ...DN.marcas };
+    if (e) m[k] = { e, u: new Date().toISOString().slice(0, 10) }; else delete m[k];
+    DN.marcas = m;
+    const y = window.scrollY; render(); window.scrollTo(0, y);
+    if (S.db) { try { await S.db.doc("verifDianMarcas/general").set(m); } catch (err) { toast(`No se pudo guardar la revisión: ${err.message || err.code}`); } }
+  }
+  async function guardarTolDN(v) {
+    const t = Math.max(1, Math.round(Number(v) || 100));
+    DN.cfg = { ...DN.cfg, tol: t };
+    if (S.db) { try { await S.db.doc("config/dian").set(DN.cfg); } catch { /* */ } }
+    if (DN.dian && DN.libro) await verificar(true); else render();
+  }
+
+  /* ---------- datos de la vista: el cruce en memoria (completo) o la verificación guardada (solo novedades) */
+  function idsDN() {
+    const s = new Set(DN.guardadas.keys()); if (DN.R) s.add(DN.R.id);
+    return [...s].sort().reverse();
+  }
+  let cacheDN = { R: null, X: null };
+  function datosDN() {
+    const ids = idsDN();
+    if (!DN.sel || !ids.includes(DN.sel)) DN.sel = ids[0] || null;
+    const id = DN.sel; if (!id) return null;
+    if (DN.R && DN.R.id === id) {
+      if (cacheDN.R !== DN.R) {
+        const R = DN.R;
+        cacheDN = { R, X: { ...R, completo: true, pendientes: [...R.filas.filter(PEND_DN), ...R.arrastre], novedades: R.filas.filter((f) => !PEND_DN(f) && f.est !== "anul" && NOVEDAD_DN(f)), anuladas: R.filas.filter((f) => f.est === "anul") } };
+      }
+      return cacheDN.X;
+    }
+    const g = DN.guardadas.get(id);
+    return g ? { ...g, completo: false, filas: null } : null;
+  }
+
+  /* ---------- piezas de la vista */
+  const chipDN = ([t, c]) => `<span class="chip ${c}">${esc(t)}</span>`;
+  const chipsObs = (f) => (f.obs || []).map((o) => OBS_DN[o] ? chipDN(OBS_DN[o]) : "").join(" ");
+  const montoDN = (v) => `<td class="num${v < -0.5 ? " neg" : ""}">${fmt(v)}</td>`;
+  const difDN = (v) => `<td class="num${Math.abs(v) > 1 ? " neg" : ""}">${Math.abs(v) < 0.005 ? "–" : fmtC(v)}</td>`;
+  function zonaDN() {
+    const fila = (r, t) => r
+      ? `<div class="dn-arch listo"><b>${t}</b><small>${esc(r.archivo)}</small><small>${r.tipo === "dian" ? `${fmt(r.docs.length)} documentos` : `${fmt(r.cta.length)} movimientos`} · del ${fechaC(r.desde)} al ${fechaC(r.hasta)}</small></div>`
+      : `<div class="dn-arch"><b>${t}</b><small>Falta cargarlo</small></div>`;
+    return `<div class="zona" id="zona-dn" tabindex="0" role="button" aria-label="Cargar reporte DIAN y libro auxiliar"><b>Suelte aquí el reporte de la DIAN y el libro auxiliar</b><span>Los dos en Excel (.xlsx), del mismo período. Puede soltarlos juntos o uno a la vez.</span></div>
+      <div class="dn-archivos">${fila(DN.dian, "Reporte de documentos electrónicos DIAN")}${fila(DN.libro, "Libro Auxiliar por Nit (MantisWeb)")}</div>`;
+  }
+  function cabeceraDN(X, titulo, sub) {
+    const ids = idsDN();
+    return `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start">
+      <div><h2>${esc(titulo)}</h2><p class="sub" style="margin:0">${sub}</p></div>
+      <div class="fila"><select id="dn-sel" aria-label="Período verificado">${ids.map((i) => `<option value="${esc(i)}" ${i === X.id ? "selected" : ""}>${esc(textoPer(i))}</option>`).join("")}</select>
+      <button class="btn" data-dn="excel">Excel</button></div></div>
+      ${X.completo ? "" : `<p class="pie">Verificación guardada el ${esc(fechaC((X.cargado || "").slice(0, 10)))}. Aquí se ven las novedades; para consultar documento por documento, vuelva a cargar los dos archivos.</p>`}</section>`;
+  }
+  function filtrosDN(X, opts = {}) {
+    const meses = [...new Set((X.meses || []).map((m) => m.mes))].sort();
+    return `<div class="dn-filtros">
+      <input type="text" id="dn-filtro" value="${esc(DN.filtro)}" placeholder="Buscar por número, NIT, tercero o comprobante" aria-label="Buscar">
+      <select id="dn-grupo" aria-label="Ventas o compras"><option value="">Ventas y compras</option><option value="C" ${DN.fGrupo === "C" ? "selected" : ""}>Solo compras y gastos</option><option value="V" ${DN.fGrupo === "V" ? "selected" : ""}>Solo ventas</option></select>
+      <select id="dn-mes" aria-label="Mes"><option value="">Todos los meses</option>${meses.map((m) => `<option value="${m}" ${DN.fMes === m ? "selected" : ""}>${esc(mesTexto(m))}</option>`).join("")}</select>
+      ${opts.rev ? `<select id="dn-rev" aria-label="Revisión"><option value="">Pendientes y revisadas</option><option value="pend" ${DN.fRev === "pend" ? "selected" : ""}>Solo pendientes</option><option value="just" ${DN.fRev === "just" ? "selected" : ""}>Solo justificadas</option></select>` : ""}
+      ${opts.est ? `<select id="dn-est" aria-label="Estado"><option value="">Todos los estados</option>${Object.entries(EST_DN).map(([k, [t]]) => `<option value="${k}" ${DN.fEst === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>` : ""}
+    </div>`;
+  }
+  function filtrarDN(xs, opts = {}) {
+    const q = DN.filtro.trim().toLowerCase(), qa = VerifDian.alnum(q);
+    return xs.filter((f) => {
+      if (DN.fGrupo && f.g !== DN.fGrupo) return false;
+      if (DN.fMes && !(f.f || "").startsWith(DN.fMes)) return false;
+      if (opts.rev && DN.fRev === "pend" && justificada(f)) return false;
+      if (opts.rev && DN.fRev === "just" && !justificada(f)) return false;
+      if (opts.est && DN.fEst && f.est !== DN.fEst) return false;
+      if (q && !((qa && (f.doc || "").includes(qa)) || (f.nit || "").includes(q) || (f.nom || "").toLowerCase().includes(q) || (f.num || "").toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }
+
+  function hallazgosDN(X) {
+    const V = X.resumen.V, C = X.resumen.C, H = [];
+    const n = (x) => fmt(x);
+    const ir = (v) => `<button class="btn chico" data-nav="dian:${v}">Ver</button>`;
+    if (!V.n) H.push(["advertencia", "El reporte de la DIAN no trae facturas de venta emitidas.", ""]);
+    else if (!V.falta && !V.dif) H.push(["ok", `Las ${n(V.n)} facturas y notas de venta de la DIAN están en el software con el mismo valor e IVA${V.red ? ` (${n(V.red)} con diferencias de centavos por redondeo)` : ""}.`, ""]);
+    else {
+      if (V.falta) H.push(["error", `${n(V.falta)} facturas o notas de venta de la DIAN no están en el software ($ ${fmt(V.faltaTot)}).`, ir("pendientes")]);
+      if (V.dif) H.push(["error", `${n(V.dif)} facturas de venta con valor o IVA distinto al de la DIAN.`, ir("diferencias")]);
+    }
+    if (V.nit) H.push(["advertencia", `${n(V.nit)} facturas de venta registradas a un tercero distinto del que figura en la DIAN.`, ir("diferencias")]);
+    if (V.mes) H.push(["advertencia", `${n(V.mes)} facturas de venta registradas en un mes distinto al de su emisión.`, ir("diferencias")]);
+    if (X.resumen.libroVentas.n) H.push(["error", `${n(X.resumen.libroVentas.n)} comprobantes de venta del software no aparecen en la DIAN (no transmitidos, rechazados o anulados solo en el software): $ ${fmt(X.resumen.libroVentas.tot)}.`, ir("libros")]);
+    if (C.falta) H.push(["error", `${n(C.falta)} documentos de compra o gasto de la DIAN no están registrados en el software: $ ${fmt(C.faltaTot)}, con IVA de $ ${fmt(C.faltaIva)}.`, ir("pendientes")]);
+    else if (C.n) H.push(["ok", `Todos los documentos de compra y gasto de la DIAN están registrados.`, ""]);
+    if (C.dif) H.push(["error", `${n(C.dif)} compras con valor o IVA distinto al de la DIAN (más de $ ${fmt(X.tol)}).`, ir("diferencias")]);
+    const ivaCosto = (X.novedades || []).filter((f) => (f.obs || []).includes("ivaCosto")).length;
+    if (ivaCosto) H.push(["advertencia", `${n(ivaCosto)} facturas con IVA que se registraron sin IVA descontable (llevado al costo o al gasto).`, ir("diferencias")]);
+    if (C.dup) H.push(["error", `${n(C.dup)} facturas de compra con posible doble registro.`, ir("diferencias")]);
+    if (C.mes) H.push(["info", `${n(C.mes)} compras registradas en un mes distinto a la fecha de la factura: revise el período del IVA descontable.`, ir("diferencias")]);
+    if (C.aprox) H.push(["info", `${n(C.aprox)} compras están en el libro sin el número de la factura; se cruzaron por proveedor, valor y fecha.`, ir("diferencias")]);
+    if (C.anul) H.push(["info", `${n(C.anul)} documentos recibidos se anulan entre sí (factura y nota crédito por el mismo valor, sin registrar): no requieren registro.`, ir("pendientes")]);
+    if (X.resumen.libroCompras.n) H.push(["advertencia", `${n(X.resumen.libroCompras.n)} comprobantes con IVA descontable o cuenta por pagar no tienen factura electrónica en la DIAN: IVA de $ ${fmt(X.resumen.libroCompras.iva)}.`, ir("libros")]);
+    if (X.resumen.regularizadas) H.push(["ok", `${n(X.resumen.regularizadas)} pendientes de ${esc(textoPer(X.previo))} ya quedaron registrados en este período.`, ir("pendientes")]);
+    if (X.resumen.arrastre) H.push(["advertencia", `${n(X.resumen.arrastre)} pendientes de ${esc(textoPer(X.previo))} siguen sin registrar.`, ir("pendientes")]);
+    const nj = (X.pendientes || []).filter(justificada).length;
+    if (nj) H.push(["info", `${n(nj)} pendientes están justificados en la revisión (rechazados, de otra empresa o revisados).`, ir("pendientes")]);
+    if (X.resumen.eventos || X.resumen.nomina) H.push(["info", `La DIAN reporta además ${n(X.resumen.eventos)} eventos (acuses y aceptaciones de facturas) y ${n(X.resumen.nomina)} documentos de nómina electrónica, que no se cruzan con el libro.`, ""]);
+    return H;
+  }
+
+  function vistaDian() {
+    let html = "";
+    if (DN.ocupado) html += `<div class="aviso info"><p><span class="girando" aria-hidden="true"></span>${esc(DN.ocupado)}</p></div>`;
+    if (DN.error) html += `<div class="aviso error"><p>${esc(DN.error)}</p></div>`;
+    const X = datosDN();
+    if (!X || DN.vista === "resumen") return html + dnResumen(X);
+    if (DN.vista === "pendientes") return html + dnPendientes(X);
+    if (DN.vista === "diferencias") return html + dnDiferencias(X);
+    if (DN.vista === "libros") return html + dnLibros(X);
+    return html + dnDetalle(X);
+  }
+
+  function dnResumen(X) {
+    let html = `<section class="panel"><h2>Verificación DIAN contra el software</h2>
+      <p class="sub">Cruza los documentos electrónicos que la DIAN tiene de la empresa (facturas de venta, notas, documento soporte y las facturas que nos emitieron los proveedores) contra el Libro Auxiliar por Nit de MantisWeb: que todo esté registrado, por el mismo valor, el mismo IVA, el mismo tercero y en el mismo mes; y lo que está en el software sin soporte en la DIAN.</p>
+      ${zonaDN()}
+      <details class="conf" style="margin-top:12px"><summary>Qué archivos descargar cada mes</summary><div>
+        <p style="margin:0"><b>DIAN:</b> en el portal de facturación electrónica (catalogo-vpfe.dian.gov.co) entre a <b>Documentos → Listado de documentos</b>, elija las fechas del mes y exporte a Excel. Trae en una sola hoja lo emitido y lo recibido.</p>
+        <p style="margin:0"><b>MantisWeb:</b> <b>Libro Auxiliar por Nit</b> de todas las cuentas, del primer al último día del mismo mes, exportado a Excel.</p>
+        <p style="margin:0">La primera verificación puede ser acumulada (por ejemplo, enero a septiembre). Desde ahí se hace mes a mes: lo que quedó pendiente se arrastra solo y, si se registró en el mes siguiente, aparece como regularizado.</p>
+        <div class="fila"><label for="dn-tol">Diferencia aceptada por redondeo</label><input type="number" id="dn-tol" min="1" step="1" value="${esc(DN.cfg.tol)}" style="width:110px"><span class="pie" style="margin:0">pesos por documento. Por encima de este valor se marca como diferencia.</span></div>
+      </div></details></section>`;
+    for (const [t, m] of DN.avisos) html += `<div class="aviso ${t}"><p>${esc(m)}</p></div>`;
+    if (!X) return html;
+    const V = X.resumen.V, C = X.resumen.C;
+    const pendJ = (X.pendientes || []).filter((f) => !justificada(f));
+    const pend = { n: pendJ.length, tot: pendJ.reduce((s, f) => s + f.tot, 0), iva: pendJ.reduce((s, f) => s + f.iva, 0) };
+    html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start">
+      <div><h2>Resultado de ${esc(textoPer(X.id))}</h2><p class="sub" style="margin:0">DIAN del ${fechaC(X.desde)} al ${fechaC(X.hasta)} · libro del ${fechaC(X.libroDesde)} al ${fechaC(X.libroHasta)} · ${esc(X.archivos?.dian || "")} y ${esc(X.archivos?.libro || "")}</p></div>
+      <div class="fila"><select id="dn-sel" aria-label="Período verificado">${idsDN().map((i) => `<option value="${esc(i)}" ${i === X.id ? "selected" : ""}>${esc(textoPer(i))}</option>`).join("")}</select>
+      ${X.completo && DN.dian && DN.libro ? `<button class="btn" data-dn="reverificar">Volver a cruzar</button>` : ""}<button class="btn primario" data-dn="excel">Excel</button></div></div></section>
+      <div class="kpis">
+        <div class="kpi ${V.falta || V.dif ? "dn-alerta" : "dn-bien"}"><span>Ventas en la DIAN</span><b>${fmt(V.n)}</b><small>$ ${fmt(V.tot)} · ${fmt(V.ok)} cuadran</small></div>
+        <div class="kpi ${C.falta || C.dif ? "dn-alerta" : "dn-bien"}"><span>Compras y gastos en la DIAN</span><b>${fmt(C.n)}</b><small>$ ${fmt(C.tot)} · ${fmt(C.ok)} cuadran</small></div>
+        <div class="kpi ${pend.n ? "dn-alerta" : "dn-bien"}"><span>Por registrar en el software</span><b>${fmt(pend.n)}</b><small>$ ${fmt(pend.tot)} · IVA $ ${fmt(pend.iva)}</small></div>
+        <div class="kpi ${V.dif + C.dif ? "dn-alerta" : "dn-bien"}"><span>Con diferencias de valor o IVA</span><b>${fmt(V.dif + C.dif)}</b><small>${fmt(V.red + C.red)} más con diferencias de redondeo</small></div>
+        <div class="kpi ${X.resumen.libroVentas.n + X.resumen.libroCompras.n ? "dn-alerta" : "dn-bien"}"><span>En el software sin la DIAN</span><b>${fmt(X.resumen.libroVentas.n + X.resumen.libroCompras.n)}</b><small>IVA descontable sin soporte $ ${fmt(X.resumen.libroCompras.iva)}</small></div>
+      </div>`;
+    const H = hallazgosDN(X);
+    html += `<section class="panel"><h2>Hallazgos</h2><ul class="hallazgos">${H.map(([t, m, b]) => `<li><span class="chip ${t}">${{ ok: "Correcto", info: "Dato", advertencia: "Revisar", error: "Atención" }[t]}</span> ${m} ${b}</li>`).join("")}</ul></section>`;
+    // Mes a mes
+    const M = X.meses || [];
+    const tot = (k) => M.reduce((s, m) => s + (m[k] || 0), 0);
+    const filaM = (m, cls = "") => `<tr class="${cls}"><td>${m.mes ? esc(mesTexto(m.mes)) : "Total"}</td>
+      <td class="num">${fmt(m.vN)}</td>${montoDN(m.vTot - m.vIva)}${montoDN(m.vIva)}${montoDN(m.vLIva)}${difDN(m.vIva - m.vLIva)}
+      <td class="num">${fmt(m.cN)}</td>${montoDN(m.cIva)}${montoDN(m.cLIva)}<td class="num${m.cFalta ? " neg" : ""}">${fmt(m.cFalta)}</td>${montoDN(m.cFaltaIva)}${montoDN(m.lcIva)}</tr>`;
+    html += `<section class="panel"><h2>Mes a mes</h2><p class="sub">Según la fecha del documento en la DIAN. El IVA en libros es el registrado en el comprobante de cada documento.</p>
+      <div class="tabla-env"><table class="lista dn"><thead><tr><th rowspan="2">Mes</th><th colspan="5" class="dn-grp">Ventas</th><th colspan="6" class="dn-grp">Compras y gastos</th></tr>
+      <tr><th class="num">Docs.</th><th class="num">Base DIAN</th><th class="num">IVA DIAN</th><th class="num">IVA libros</th><th class="num">Dif.</th><th class="num">Docs.</th><th class="num">IVA DIAN</th><th class="num">IVA libros</th><th class="num">Sin registrar</th><th class="num">IVA sin registrar</th><th class="num">IVA libro sin DIAN</th></tr></thead>
+      <tbody>${M.map((m) => filaM(m)).join("")}${M.length > 1 ? filaM({ mes: "", ...Object.fromEntries(["vN", "vTot", "vIva", "vLIva", "cN", "cIva", "cLIva", "cFalta", "cFaltaIva", "lcIva"].map((k) => [k, tot(k)])) }, "dn-tot") : ""}</tbody></table></div>
+      <p class="pie">«IVA libros» de compras puede ser menor que el de la DIAN por las facturas sin registrar y por las que se registraron sin IVA descontable. «IVA libro sin DIAN» es IVA descontable de comprobantes que no tienen factura electrónica en el reporte.</p></section>`;
+    if ((X.nomina || []).length) html += `<details class="conf"><summary>Nómina electrónica reportada a la DIAN (informativo)</summary><div><div class="tabla-env"><table class="lista"><thead><tr><th>Mes</th><th class="num">Documentos</th><th class="num">Total</th></tr></thead><tbody>${X.nomina.map((m) => `<tr><td>${esc(mesTexto(m.mes))}</td><td class="num">${fmt(m.n)}</td><td class="num">${fmt(m.total)}</td></tr>`).join("")}</tbody></table></div></div></details>`;
+    // Historial
+    const gs = [...DN.guardadas.values()].sort((a, b) => b.id.localeCompare(a.id));
+    if (gs.length) {
+      html += `<section class="panel"><h2>Verificaciones guardadas</h2><p class="sub">${S.db ? "Quedan en línea para todo el equipo." : "Esta vista no guarda en línea: se pierden al cerrar la página."}</p><div class="tabla-env"><table class="lista dn"><thead><tr><th>Período</th><th>Archivos</th><th>Cargado</th><th class="num">Por registrar</th><th class="num">Diferencias</th><th class="num">Sin DIAN</th><th></th></tr></thead><tbody>
+        ${gs.map((g) => `<tr><td><b>${esc(textoPer(g.id))}</b></td><td><small>${esc(g.archivos?.dian || "")}</small><small>${esc(g.archivos?.libro || "")}</small></td><td>${esc(fechaC((g.cargado || "").slice(0, 10)))}</td>
+          <td class="num">${fmt((g.pendientes || []).filter((f) => !justificada(f)).length)}</td><td class="num">${fmt((g.resumen?.V?.dif || 0) + (g.resumen?.C?.dif || 0))}</td><td class="num">${fmt((g.resumen?.libroVentas?.n || 0) + (g.resumen?.libroCompras?.n || 0))}</td>
+          <td class="num">${DN.confirmar === g.id ? `<button class="btn chico peligro" data-dn="borrar" data-id="${esc(g.id)}">Confirmar</button> <button class="btn chico" data-dn="cancelar">No</button>` : `<button class="btn chico" data-dn="ver" data-id="${esc(g.id)}">Ver</button> <button class="btn chico" data-dn="pedir-borrar" data-id="${esc(g.id)}">Eliminar</button>`}</td></tr>`).join("")}
+        </tbody></table></div></section>`;
+    }
+    return html;
+  }
+
+  function tablaDocsDN(xs, opts = {}) {
+    if (!xs.length) return `<p class="vacio">${esc(opts.vacio || "No hay documentos.")}</p>`;
+    const lim = opts.limite || xs.length, ys = xs.slice(0, lim);
+    const filas = ys.map((f) => `<tr class="${justificada(f) && opts.marca ? "justif" : ""}">
+      <td>${esc(fechaC(f.f))}</td><td>${esc(tipoTxt(f))}${opts.grupo ? `<small>${grupoTxt(f.g)}</small>` : ""}</td><td><b>${esc(f.doc)}</b></td>
+      <td class="nom">${esc(f.nom)}<small>NIT ${esc(f.nit)}${f.nitL ? ` · en libros ${esc(f.nitL)}` : ""}</small></td>
+      ${montoDN(f.tot)}${montoDN(f.iva)}
+      ${opts.libro ? `<td>${esc(f.num || "–")}<small>${esc(fechaC(f.fL))}</small></td>${montoDN(f.Ltot)}${difDN(f.dT ?? r2(f.tot - f.Ltot))}${montoDN(f.Liva)}${difDN(f.dI ?? r2(f.iva - f.Liva))}` : ""}
+      <td>${opts.estado ? chipDN(EST_DN[f.est] || [f.est, "gris"]) + " " : ""}${f.ant ? chipDN([`De ${textoPer(f.ant)}`, "advertencia"]) + " " : ""}${chipsObs(f)}${f.anulPor ? `<small>Anulada con ${esc(f.anulPor)}</small>` : ""}${f.anula ? `<small>Anula ${esc(f.anula)}</small>` : ""}${f.est === "sinc" && f.num ? `<small>Aparece en ${esc(f.num)}</small>` : ""}${(f.dup || []).length ? `<small>${esc(f.dup.join(", "))}</small>` : ""}</td>
+      ${opts.marca ? `<td><select class="dn-marca" data-dnmarca="${esc(f.k)}" aria-label="Revisión">${MARCAS_DN.map(([v, t]) => `<option value="${v}" ${(DN.marcas[f.k]?.e || "") === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></td>` : ""}</tr>`).join("");
+    const sum = (k) => xs.reduce((s, f) => s + (f[k] || 0), 0);
+    const totFila = opts.total ? `<tr class="dn-tot"><td colspan="4">Total (${fmt(xs.length)})</td>${montoDN(sum("tot"))}${montoDN(sum("iva"))}${opts.libro ? `<td></td>${montoDN(sum("Ltot"))}<td></td>${montoDN(sum("Liva"))}<td></td>` : ""}<td colspan="${opts.marca ? 2 : 1}"></td></tr>` : "";
+    return `<div class="tabla-env"><table class="lista dn"><thead><tr><th>Fecha</th><th>Tipo</th><th>Número</th><th>Tercero</th><th class="num">Total DIAN</th><th class="num">IVA DIAN</th>
+      ${opts.libro ? `<th>Comprobante</th><th class="num">Total libro</th><th class="num">Dif.</th><th class="num">IVA libro</th><th class="num">Dif. IVA</th>` : ""}<th>Situación</th>${opts.marca ? "<th>Revisión</th>" : ""}</tr></thead>
+      <tbody>${filas}${totFila}</tbody></table></div>${xs.length > lim ? `<div class="fila" style="justify-content:center;margin-top:10px"><span class="pie" style="margin:0">Se muestran ${fmt(lim)} de ${fmt(xs.length)}.</span><button class="btn chico" data-dn="mas">Ver más</button></div>` : ""}`;
+  }
+
+  function dnPendientes(X) {
+    const P = filtrarDN(X.pendientes || [], { rev: true });
+    const orden = (a, b) => a.f.localeCompare(b.f) || a.doc.localeCompare(b.doc);
+    const comp = P.filter((f) => f.g === "C").sort(orden), vent = P.filter((f) => f.g === "V").sort(orden);
+    let html = cabeceraDN(X, "Por registrar en el software", `Documentos que están en la DIAN y no en el libro auxiliar de ${esc(textoPer(X.id))}, más los pendientes que vienen de verificaciones anteriores. Marque en «Revisión» los que no se van a registrar y por qué: la marca se conserva de un mes a otro.`);
+    html += `<section class="panel">${filtrosDN(X, { rev: true })}</section>`;
+    html += `<section class="panel"><h2>Compras, gastos y documento soporte</h2><p class="sub">${fmt(comp.length)} documentos · $ ${fmt(comp.reduce((s, f) => s + f.tot, 0))} · IVA $ ${fmt(comp.reduce((s, f) => s + f.iva, 0))}</p>${tablaDocsDN(comp, { marca: true, total: true, estado: true, vacio: "No hay compras pendientes por registrar." })}</section>`;
+    html += `<section class="panel"><h2>Facturas y notas de venta</h2><p class="sub">${fmt(vent.length)} documentos · $ ${fmt(vent.reduce((s, f) => s + f.tot, 0))}</p>${tablaDocsDN(vent, { marca: true, total: true, estado: true, vacio: "Todas las ventas de la DIAN están en el software." })}</section>`;
+    const reg = filtrarDN(X.regularizadas || []);
+    if (reg.length) html += `<section class="panel"><h2>Pendientes anteriores que ya se registraron</h2><p class="sub">Venían pendientes de ${esc(textoPer(X.previo))} y aparecen en el libro de este período.</p>${tablaDocsDN(reg, { libro: true, estado: true, total: true })}</section>`;
+    const an = filtrarDN(X.anuladas || []);
+    if (an.length) html += `<details class="conf"><summary>Anuladas entre sí: factura y nota crédito del mismo valor, sin registrar (${fmt(an.length)})</summary><div>${tablaDocsDN(an, {})}<p class="pie" style="margin:0">El proveedor emitió la factura y la anuló con una nota crédito por el mismo valor; ninguna de las dos se registró. Si alguna sí debía registrarse, búsquela en la DIAN.</p></div></details>`;
+    return html;
+  }
+
+  function coincideDif(f) {
+    const o = f.obs || [];
+    switch (DN.fDif) {
+      case "valor": return f.est === "dif" && (o.includes("tot") || o.includes("iva"));
+      case "ivaCosto": return o.includes("ivaCosto");
+      case "red": return f.est === "red";
+      case "nit": return o.includes("nit");
+      case "mes": return o.includes("mes");
+      case "dup": return o.includes("dup") || o.includes("dupAnt");
+      case "aprox": return o.includes("aprox") || o.includes("numero");
+      default: return true;
+    }
+  }
+  function dnDiferencias(X) {
+    const base = filtrarDN(X.novedades || []);
+    const cuenta = Object.fromEntries(FILTROS_DIF.map(([k]) => { const prev = DN.fDif; DN.fDif = k; const n = base.filter(coincideDif).length; DN.fDif = prev; return [k, n]; }));
+    const xs = base.filter(coincideDif).sort((a, b) => (b.est === "dif") - (a.est === "dif") || Math.abs(b.dT || 0) + Math.abs(b.dI || 0) - Math.abs(a.dT || 0) - Math.abs(a.dI || 0) || a.f.localeCompare(b.f));
+    let html = cabeceraDN(X, "Diferencias entre la DIAN y el software", `Documentos que sí están registrados pero con alguna novedad. Diferencia: más de $ ${fmt(X.tol)} en el total o en el IVA. Redondeo: entre $ 1 y $ ${fmt(X.tol)}.`);
+    html += `<section class="panel">${filtrosDN(X)}<div class="seg dn-seg" role="group" aria-label="Tipo de novedad" style="margin-top:10px">${FILTROS_DIF.map(([k, t]) => `<button data-dndif="${k}" aria-pressed="${DN.fDif === k}">${esc(t)}<span class="chip gris">${fmt(cuenta[k])}</span></button>`).join("")}</div></section>`;
+    html += `<section class="panel">${tablaDocsDN(xs, { libro: true, estado: true, grupo: true, limite: DN.limite, vacio: "No hay documentos con esta novedad." })}
+      <p class="pie">«IVA no descontado»: la factura trae IVA y en el libro no se llevó a la cuenta 2408 (quedó en el costo o el gasto). «Sin número de factura en el libro»: el comprobante no cita el número; se cruzó por proveedor, valor y fecha. «Registrada en otro mes»: afecta el período en que se toma el IVA.</p></section>`;
+    return html;
+  }
+
+  function dnLibros(X) {
+    const q = DN.filtro.trim().toLowerCase();
+    const f = (r) => (!DN.fMes || r.f.startsWith(DN.fMes)) && (!q || r.num.toLowerCase().includes(q) || (r.nit || "").includes(q) || (r.nom || "").toLowerCase().includes(q) || (r.fac || "").toLowerCase().includes(q));
+    const LV = (DN.fGrupo === "C" ? [] : X.libroVentas || []).filter(f), LC = (DN.fGrupo === "V" ? [] : X.libroCompras || []).filter(f);
+    let html = cabeceraDN(X, "En el software sin soporte en la DIAN", `Comprobantes del libro de ${esc(textoPer(X.id))} que no corresponden a ningún documento del reporte de la DIAN.`);
+    html += `<section class="panel">${filtrosDN(X)}</section>`;
+    html += `<section class="panel"><h2>Ventas en el software que no están en la DIAN</h2><p class="sub">Comprobantes con la numeración de facturación electrónica y movimiento de ingresos. Pueden ser facturas no transmitidas, rechazadas o anuladas solo en el software.</p>
+      ${LV.length ? `<div class="tabla-env"><table class="lista dn"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cliente</th><th class="num">Ingreso</th><th class="num">IVA</th><th class="num">Total</th><th>Concepto</th></tr></thead><tbody>
+      ${LV.map((r) => `<tr><td>${esc(fechaC(r.f))}</td><td><b>${esc(r.num)}</b></td><td class="nom">${esc(r.nom)}<small>NIT ${esc(r.nit)}</small></td>${montoDN(r.ing)}${montoDN(r.iva)}${montoDN(r.tot)}<td><small>${esc(r.conc)}</small></td></tr>`).join("")}
+      <tr class="dn-tot"><td colspan="3">Total (${fmt(LV.length)})</td>${montoDN(LV.reduce((s, r) => s + r.ing, 0))}${montoDN(LV.reduce((s, r) => s + r.iva, 0))}${montoDN(LV.reduce((s, r) => s + r.tot, 0))}<td></td></tr></tbody></table></div>` : `<p class="vacio">Todas las ventas del software están en la DIAN.</p>`}</section>`;
+    html += `<section class="panel"><h2>Compras y gastos sin factura electrónica en la DIAN</h2><p class="sub">Comprobantes con IVA descontable o con cuenta por pagar (22, 2335, 2380) que no se cruzaron con ningún documento recibido. El IVA descontable exige factura electrónica: revise si el proveedor la emitió con otro número, si es un documento de otro período o si falta pedirla.</p>
+      ${LC.length ? `<div class="tabla-env"><table class="lista dn"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Tercero</th><th>Factura citada</th><th class="num">Base</th><th class="num">IVA</th><th>Concepto</th></tr></thead><tbody>
+      ${LC.map((r) => `<tr><td>${esc(fechaC(r.f))}</td><td><b>${esc(r.num)}</b></td><td class="nom">${esc(r.nom)}<small>NIT ${esc(r.nit)}</small></td><td>${esc(r.fac || "–")}${r.dupAnt ? ` ${chipDN(OBS_DN.dupAnt)}` : ""}</td>${montoDN(r.base)}${montoDN(r.iva)}<td><small>${esc(r.conc)}</small></td></tr>`).join("")}
+      <tr class="dn-tot"><td colspan="4">Total (${fmt(LC.length)})</td>${montoDN(LC.reduce((s, r) => s + r.base, 0))}${montoDN(LC.reduce((s, r) => s + r.iva, 0))}<td></td></tr></tbody></table></div>` : `<p class="vacio">No hay compras con IVA o cuentas por pagar sin soporte en la DIAN.</p>`}
+      ${X.recortado ? `<p class="pie">La lista guardada se recortó para caber en la base de datos. Vuelva a cargar los archivos para verla completa.</p>` : ""}</section>`;
+    return html;
+  }
+
+  function dnDetalle(X) {
+    let html = cabeceraDN(X, "Consultar documentos", X.completo ? `Los ${fmt(X.filas.length)} documentos de la DIAN de ${esc(textoPer(X.id))} con el comprobante donde quedaron registrados.` : "Documentos con novedad de la verificación guardada.");
+    const base = X.completo ? X.filas : [...(X.pendientes || []), ...(X.novedades || []), ...(X.anuladas || [])];
+    html += `<section class="panel">${filtrosDN(X, { est: true })}</section>`;
+    const xs = filtrarDN(base, { est: true }).slice().sort((a, b) => a.f.localeCompare(b.f) || a.doc.localeCompare(b.doc));
+    html += `<section class="panel">${tablaDocsDN(xs, { libro: true, estado: true, grupo: true, limite: DN.limite, vacio: "Ningún documento coincide con la búsqueda." })}</section>`;
+    return html;
+  }
+
+  /* ---------- exportación a Excel */
+  async function exportarDN() {
+    const X = datosDN(); if (!X) return;
+    try {
+      await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
+      if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
+      const wb = XLSX.utils.book_new();
+      const hoja = (nombre, aoa, anchos) => { const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = anchos.map((w) => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, nombre.slice(0, 31)); };
+      const encab = (t) => [[S.cfg.empresa.razon], [`NIT ${S.cfg.empresa.nit}`], [t], [`Período: ${textoPer(X.id)} · DIAN ${X.desde} a ${X.hasta} · libro ${X.libroDesde} a ${X.libroHasta}`], []];
+      const V = X.resumen.V, C = X.resumen.C;
+      hoja("Resumen", [...encab("Verificación DIAN contra el software"),
+        ["", "Ventas", "Compras y gastos"], ["Documentos en la DIAN", V.n, C.n], ["Valor total DIAN", V.tot, C.tot], ["IVA DIAN", V.iva, C.iva],
+        ["Cuadran (incluye redondeo)", V.ok, C.ok], ["Con diferencia de valor o IVA", V.dif, C.dif], ["Diferencias de redondeo", V.red, C.red],
+        ["No registrados", V.falta, C.falta], ["Valor no registrado", V.faltaTot, C.faltaTot], ["IVA no registrado", V.faltaIva, C.faltaIva],
+        ["Registrados en otro mes", V.mes, C.mes], ["Tercero distinto", V.nit, C.nit], ["Posible doble registro", V.dup, C.dup], ["Anulados entre sí", V.anul, C.anul],
+        ["En el software sin la DIAN (comprobantes)", X.resumen.libroVentas.n, X.resumen.libroCompras.n], ["IVA en el software sin la DIAN", X.resumen.libroVentas.iva, X.resumen.libroCompras.iva], [],
+        ["Hallazgos"], ...hallazgosDN(X).map(([t, m]) => [{ ok: "Correcto", info: "Dato", advertencia: "Revisar", error: "Atención" }[t], m.replace(/<[^>]+>/g, "")]), [],
+        ["Mes", "Ventas docs.", "Base ventas DIAN", "IVA generado DIAN", "IVA generado libros", "Compras docs.", "IVA descontable DIAN", "IVA descontable libros", "Compras sin registrar", "IVA sin registrar", "IVA libro sin DIAN"],
+        ...(X.meses || []).map((m) => [m.mes, m.vN, r2(m.vTot - m.vIva), m.vIva, m.vLIva, m.cN, m.cIva, m.cLIva, m.cFalta, m.cFaltaIva, m.lcIva])], [34, 16, 18, 18, 18, 14, 18, 18, 14, 14, 16]);
+      const cab = ["Grupo", "Tipo", "Número", "Fecha", "NIT", "Tercero", "Total DIAN", "IVA DIAN", "Comprobante", "Fecha libro", "Total libro", "IVA libro", "Dif. total", "Dif. IVA", "Estado", "Observaciones", "Revisión"];
+      const filaX = (f) => [grupoTxt(f.g), tipoTxt(f), f.doc, f.f, f.nit, f.nom, f.tot, f.iva, f.num || "", f.fL || "", f.Ltot || 0, f.Liva || 0, r2(f.tot - (f.Ltot || 0)), r2(f.iva - (f.Liva || 0)),
+        (EST_DN[f.est] || [f.est])[0], [f.ant ? `De ${textoPer(f.ant)}` : "", ...(f.obs || []).map((o) => (OBS_DN[o] || [o])[0]), f.anulPor ? `Anulada con ${f.anulPor}` : "", f.anula ? `Anula ${f.anula}` : "", (f.dup || []).length ? `Comprobantes: ${f.dup.join(", ")}` : ""].filter(Boolean).join("; "),
+        (MARCAS_DN.find(([v]) => v === (DN.marcas[f.k]?.e || "")) || ["", ""])[1]];
+      const anchos = [9, 20, 16, 11, 13, 36, 14, 12, 15, 11, 14, 12, 12, 11, 16, 40, 26];
+      hoja("Por registrar", [...encab("Documentos de la DIAN que no están en el software"), cab, ...(X.pendientes || []).map(filaX)], anchos);
+      hoja("Diferencias", [...encab("Documentos registrados con novedad"), cab, ...(X.novedades || []).map(filaX)], anchos);
+      if ((X.regularizadas || []).length) hoja("Regularizadas", [...encab(`Pendientes de ${textoPer(X.previo)} registrados en este período`), cab, ...X.regularizadas.map(filaX)], anchos);
+      if ((X.anuladas || []).length) hoja("Anuladas entre sí", [...encab("Factura y nota crédito del mismo valor, sin registrar"), cab, ...X.anuladas.map(filaX)], anchos);
+      hoja("Ventas sin DIAN", [...encab("Ventas en el software que no están en la DIAN"), ["Comprobante", "Fecha", "NIT", "Cliente", "Ingreso", "IVA", "Total", "Concepto"], ...(X.libroVentas || []).map((r) => [r.num, r.f, r.nit, r.nom, r.ing, r.iva, r.tot, r.conc])], [15, 11, 13, 36, 14, 12, 14, 50]);
+      hoja("Compras sin DIAN", [...encab("Compras y gastos con IVA o cuenta por pagar sin factura electrónica en la DIAN"), ["Comprobante", "Fecha", "NIT", "Tercero", "Factura citada", "Base", "IVA", "Concepto", "Observación"], ...(X.libroCompras || []).map((r) => [r.num, r.f, r.nit, r.nom, r.fac, r.base, r.iva, r.conc, r.dupAnt ? "Factura ya registrada en un período anterior" : ""])], [15, 11, 13, 36, 22, 14, 12, 50, 30]);
+      if (X.completo) hoja("Todos los documentos", [...encab("Todos los documentos de la DIAN y su registro"), cab, ...X.filas.map(filaX)], anchos);
+      const data = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      await guardarArchivo(`Verificacion_DIAN_${X.id}.xlsx`, data);
+    } catch (err) { toast(`No se pudo generar el Excel: ${err.message}`); }
+  }
+
+  /* ---------- eventos del módulo */
+  function clicDian(t) {
+    if (t.id === "zona-dn") { $("#archivo-dn").click(); return true; }
+    if (t.dataset.dndif !== undefined) { DN.fDif = t.dataset.dndif; DN.limite = 300; render(); return true; }
+    const a = t.dataset.dn; if (!a) return false;
+    if (a === "excel") exportarDN();
+    else if (a === "reverificar") verificar(true);
+    else if (a === "ver") { DN.sel = t.dataset.id; DN.vista = "resumen"; render(); window.scrollTo(0, 0); }
+    else if (a === "pedir-borrar") { DN.confirmar = t.dataset.id; render(); }
+    else if (a === "cancelar") { DN.confirmar = null; render(); }
+    else if (a === "borrar") borrarVerif(t.dataset.id);
+    else if (a === "mas") { DN.limite += 300; const y = window.scrollY; render(); window.scrollTo(0, y); }
+    return true;
+  }
+  function cambioDian(el) {
+    if (el.id === "archivo-dn") { if (el.files.length) leerArchivosDian([...el.files]); el.value = ""; return true; }
+    if (el.id === "dn-sel") { DN.sel = el.value; DN.limite = 300; render(); return true; }
+    if (el.dataset.dnmarca !== undefined) { marcarDN(el.dataset.dnmarca, el.value); return true; }
+    if (el.id === "dn-tol") { guardarTolDN(el.value); return true; }
+    if (el.id === "dn-grupo") { DN.fGrupo = el.value; DN.limite = 300; render(); return true; }
+    if (el.id === "dn-mes") { DN.fMes = el.value; DN.limite = 300; render(); return true; }
+    if (el.id === "dn-rev") { DN.fRev = el.value; render(); return true; }
+    if (el.id === "dn-est") { DN.fEst = el.value; DN.limite = 300; render(); return true; }
+    return false;
+  }
+  function entradaDian(el) {
+    if (el.id !== "dn-filtro") return false;
+    DN.filtro = el.value; DN.limite = 300;
+    clearTimeout(DN.h); DN.h = setTimeout(() => { render(); const f = $("#dn-filtro"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }, 250);
+    return true;
+  }
+
   /* ------------------------------------------------------------ descargas (con manejo de permisos) */
   function avisoDescarga(html, boton) {
     const a = $("#aviso-dl");
@@ -7443,8 +8359,9 @@ const Proveedores = (() => {
 
   /* ------------------------------------------------------------ eventos */
   document.addEventListener("click", (ev) => {
-    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv");
+    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn");
     if (!t) return;
+    if ((t.id === "zona-dn" || t.dataset.dn || t.dataset.dndif !== undefined) && clicDian(t)) return;
     if (t.id === "zona-pv") return $("#archivo-pv").click();
     if (t.dataset.pvexp) return exportarPV(t.dataset.pvexp);
     if (t.dataset.pvbase) { S.pv.base = t.dataset.pvbase; return render(); }
@@ -7517,6 +8434,7 @@ const Proveedores = (() => {
   document.addEventListener("input", (ev) => {
     const el = ev.target;
     if (S.tab === "bancos" && entradaBancos(el)) return;
+    if (entradaDian(el)) return;
     if (el.id === "pv-filtro") { S.pv.filtro = el.value; clearTimeout(S.pv.h); S.pv.h = setTimeout(() => { render(); const f = $("#pv-filtro"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }, 250); return; }
     if (!S.borrador) return;
     if (el.dataset.cfg) { asignar(S.borrador, el.dataset.cfg, valorCampo(el, el.dataset.cfg)); marcarSucio(); }
@@ -7525,6 +8443,7 @@ const Proveedores = (() => {
   document.addEventListener("change", (ev) => {
     const el = ev.target;
     if (cambioBancos(el)) return;
+    if (cambioDian(el)) return;
     if (el.id === "archivo-pv" && el.files.length) { leerArchivosPV([...el.files]); el.value = ""; return; }
     if (el.id === "pv-corte") { S.pv.corte = el.value; return render(); }
     if (el.id === "pv-alcance") { S.pv.alcance = el.value; return; }
@@ -7587,10 +8506,10 @@ const Proveedores = (() => {
     const sub = $("#vista .panel .sub"); if (sub) sub.textContent = "Hay cambios sin guardar.";
   }
   // Arrastrar y soltar
-  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
-  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv"); if (z) z.classList.remove("sobre"); });
-  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
-  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
+  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
+  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn"); if (z) z.classList.remove("sobre"); });
+  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id === "zona-dn") return leerArchivosDian(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
+  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-dn" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-dn").click(); return; } if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
 
   /* ------------------------------------------------------------ base de datos */
   function estadoDB(texto, mal) { const e = $("#estado-db"); e.textContent = texto; e.classList.toggle("mal", Boolean(mal)); }
@@ -7657,6 +8576,15 @@ const Proveedores = (() => {
       if (snap.exists) S.bc.cfg = { ...clon(BC_CFG_DEF), ...snap.data() };
       if (!S.cargando && !(S.tab === "bancos" && S.bc.sucio)) render();
     }, () => {});
+    db.collection("verifDian").onSnapshot((snap) => {
+      S.dn.guardadas = new Map(snap.docs.map((d) => [d.id, d.data()]));
+      if (!S.cargando && S.tab === "dian" && !S.dn.ocupado) render();
+    }, () => {});
+    db.doc("verifDianMarcas/general").onSnapshot((snap) => {
+      S.dn.marcas = snap.exists ? { ...snap.data() } : {};
+      if (!S.cargando && S.tab === "dian" && !S.dn.ocupado && !document.activeElement?.dataset?.dnmarca) render();
+    }, () => {});
+    db.doc("config/dian").onSnapshot((snap) => { if (snap.exists) S.dn.cfg = { ...S.dn.cfg, ...snap.data() }; }, () => {});
     db.collection("declaraciones").onSnapshot((snap) => {
       S.decl = new Map(snap.docs.map((d) => [d.id, d.data()]));
       if (!S.cargando && !(S.tab === "config" && S.sucio)) render();
