@@ -3682,14 +3682,14 @@ const VerifDian = (() => {
 
   // Valor de compra de un comprobante: base (costo, gasto, inventario, activo) + IVA descontable.
   function valorCompra(L, I, lineas) {
-    let base = 0, iva = 0, cxp = 0;
+    let base = 0, iva = 0, cxp = 0, activo = 0;
     for (const i of lineas) {
       const c = L.cta[i], v = L.deb[i] - L.cred[i];
       if (c.startsWith("2408")) iva += v;
-      else if (esBase(c)) base += v;
+      else if (esBase(c)) { base += v; if (c.startsWith("15") || c.startsWith("16")) activo += v; }
       if (c.startsWith("22") || c.startsWith("2335") || c.startsWith("2380")) cxp -= v;
     }
-    return { base: r2(base), iva: r2(iva), total: r2(base + iva), cxp: r2(cxp) };
+    return { base: r2(base), iva: r2(iva), total: r2(base + iva), cxp: r2(cxp), activo: r2(activo) };
   }
 
   /* ---------------------------------------------------------- conciliación */
@@ -3702,10 +3702,16 @@ const VerifDian = (() => {
     const filas = [];
     const usado = new Map(); // numero de comprobante → filas DIAN que lo usan
 
-    const clasif = (d, Ltot, Liva) => {
+    const clasif = (d, Ltot, Liva, activo = 0) => {
       const dT = r2(d.tot - Ltot), dI = r2(d.iva - Liva);
       const obs = [];
       const aT = Math.abs(dT), aI = Math.abs(dI);
+      // Compra de activo fijo (15, 16): el IVA no se descuenta, va como mayor valor del activo.
+      // Si el total cuadra y el IVA que falta en la 2408 cabe en el valor del activo, está bien.
+      if (aT <= tol && dI > tol && activo >= dI - tol) {
+        obs.push("ivaActivo");
+        return { est: aT > 1 ? "red" : "ok", dT, dI, obs };
+      }
       let est = "ok";
       if (aT > tol || aI > tol) est = "dif";
       else if (aT > 1 || aI > 1) est = "red";
@@ -3735,10 +3741,10 @@ const VerifDian = (() => {
       const fila = { ...x, k: x.cufe ? x.cufe.slice(0, 24) : `${x.nit}|${x.doc}`, num: "", fL: "", Ltot: 0, Liva: 0, est: "falta", obs: [] };
       if (c) {
         if (x.g === "V") firmasVenta.add(firma(c.num));
-        let Ltot, Liva;
+        let Ltot, Liva, activo = 0;
         if (x.g === "V") { Ltot = r2(c.ing + c.iva + c.inc); Liva = r2(c.iva); }
-        else { const v = valorCompra(L, I, c.lin); Ltot = v.total; Liva = v.iva; }
-        Object.assign(fila, { num: c.num, fL: c.f, Ltot, Liva }, clasif(x, Ltot, Liva));
+        else { const v = valorCompra(L, I, c.lin); Ltot = v.total; Liva = v.iva; activo = v.activo; }
+        Object.assign(fila, { num: c.num, fL: c.f, Ltot, Liva }, clasif(x, Ltot, Liva, activo));
         const nits = [...c.nits.keys()].filter((n) => n && n !== nitEmp);
         if (x.nit && nits.length && !nits.some((n) => mismoNit(n, x.nit))) { fila.obs.push("nit"); fila.nitL = nits[0]; }
         if (mesDe(c.f) !== mesDe(x.f)) fila.obs.push("mes");
@@ -3789,7 +3795,7 @@ const VerifDian = (() => {
         sinMatch.push(fila);
         continue;
       }
-      Object.assign(fila, { num: p.n, fL: p.f, Ltot: p.total, Liva: p.iva }, clasif(x, p.total, p.iva));
+      Object.assign(fila, { num: p.n, fL: p.f, Ltot: p.total, Liva: p.iva }, clasif(x, p.total, p.iva, p.activo));
       fila.otrosNum = vals.slice(1).map((v) => v.n);
       const dobles = vals.filter((v) => Math.abs(v.total - x.tot) <= Math.max(tol, Math.abs(x.tot) * 0.01));
       if (dobles.length > 1) { fila.obs.push("dup"); fila.dup = dobles.map((v) => v.n); }
@@ -3812,7 +3818,7 @@ const VerifDian = (() => {
       }
       if (mejor) {
         fila.obs = fila.obs.filter((o) => o !== "pago");
-        Object.assign(fila, { num: mejor.n, fL: mejor.f, Ltot: mejor.total, Liva: mejor.iva }, clasif(fila, mejor.total, mejor.iva));
+        Object.assign(fila, { num: mejor.n, fL: mejor.f, Ltot: mejor.total, Liva: mejor.iva }, clasif(fila, mejor.total, mejor.iva, mejor.activo));
         fila.obs.push("aprox");
         if (mesDe(mejor.f) !== mesDe(fila.f)) fila.obs.push("mes");
         usado.set(mejor.n, [fila]);
@@ -3845,7 +3851,7 @@ const VerifDian = (() => {
           .filter((v) => sg * v.total > 0.5).sort((a, b) => sg * b.total - sg * a.total);
         if (vals.length) {
           const v = vals[0];
-          const r = { ...p, num: v.n, fL: v.f, Ltot: v.total, Liva: v.iva, ...clasif(p, v.total, v.iva) };
+          const r = { ...p, num: v.n, fL: v.f, Ltot: v.total, Liva: v.iva, ...clasif(p, v.total, v.iva, v.activo) };
           regularizadas.push(r);
           usado.set(v.n, [r]);
         } else arrastre.push({ ...p, ant: p.ant || prev.id || true });
@@ -7869,11 +7875,11 @@ const VerifDian = (() => {
   const NOVEDAD_DN = (f) => f.est === "dif" || f.est === "red" || (f.obs || []).some((o) => o !== "pago");
   const EST_DN = { ok: ["Cuadra", "ok"], red: ["Redondeo", "gris"], dif: ["Diferencia", "error"], falta: ["No registrada", "error"], sinc: ["Sin causación", "error"], anul: ["Anulada con nota crédito", "gris"] };
   const OBS_DN = {
-    tot: ["Valor distinto", "error"], iva: ["IVA distinto", "error"], ivaCosto: ["IVA no descontado", "advertencia"], nit: ["Tercero distinto", "advertencia"],
+    tot: ["Valor distinto", "error"], iva: ["IVA distinto", "error"], ivaCosto: ["IVA no descontado", "advertencia"], ivaActivo: ["IVA mayor valor del activo", "ok"], nit: ["Tercero distinto", "advertencia"],
     mes: ["Registrada en otro mes", "info"], dup: ["Posible doble registro", "error"], dupAnt: ["Registrada en un período anterior", "error"],
     aprox: ["Sin número de factura en el libro", "info"], numero: ["Número de factura incompleto", "info"], pago: ["Solo pagos o anticipos", "advertencia"],
   };
-  const FILTROS_DIF = [["", "Todas"], ["valor", "Valor o IVA"], ["ivaCosto", "IVA no descontado"], ["red", "Redondeo"], ["nit", "Tercero"], ["mes", "Otro mes"], ["dup", "Doble registro"], ["aprox", "Sin número"]];
+  const FILTROS_DIF = [["", "Todas"], ["valor", "Valor o IVA"], ["ivaCosto", "IVA no descontado"], ["ivaActivo", "Activos fijos"], ["red", "Redondeo"], ["nit", "Tercero"], ["mes", "Otro mes"], ["dup", "Doble registro"], ["aprox", "Sin número"]];
   const MARCAS_DN = [["", "Pendiente"], ["proximo", "Se registra el próximo mes"], ["rechazada", "Rechazada / reclamada al proveedor"], ["noaplica", "No es de la empresa"], ["revisado", "Revisado: no requiere registro"]];
   const JUSTIFICA = new Set(["rechazada", "noaplica", "revisado"]);
   const justificada = (f) => JUSTIFICA.has(DN.marcas[f.k]?.e);
@@ -8089,6 +8095,8 @@ const VerifDian = (() => {
     if (C.dif) H.push(["error", `${n(C.dif)} compras con valor o IVA distinto al de la DIAN (más de $ ${fmt(X.tol)}).`, ir("diferencias")]);
     const ivaCosto = (X.novedades || []).filter((f) => (f.obs || []).includes("ivaCosto")).length;
     if (ivaCosto) H.push(["advertencia", `${n(ivaCosto)} facturas con IVA que se registraron sin IVA descontable (llevado al costo o al gasto).`, ir("diferencias")]);
+    const ivaAct = (X.novedades || []).filter((f) => (f.obs || []).includes("ivaActivo"));
+    if (ivaAct.length) H.push(["ok", `${n(ivaAct.length)} compras de activos fijos con el IVA como mayor valor del activo ($ ${fmt(ivaAct.reduce((s, f) => s + (f.dI || 0), 0))}): cuadran.`, ir("diferencias")]);
     if (C.dup) H.push(["error", `${n(C.dup)} facturas de compra con posible doble registro.`, ir("diferencias")]);
     if (C.mes) H.push(["info", `${n(C.mes)} compras registradas en un mes distinto a la fecha de la factura: revise el período del IVA descontable.`, ir("diferencias")]);
     if (C.aprox) H.push(["info", `${n(C.aprox)} compras están en el libro sin el número de la factura; se cruzaron por proveedor, valor y fecha.`, ir("diferencias")]);
@@ -8203,6 +8211,7 @@ const VerifDian = (() => {
     switch (DN.fDif) {
       case "valor": return f.est === "dif" && (o.includes("tot") || o.includes("iva"));
       case "ivaCosto": return o.includes("ivaCosto");
+      case "ivaActivo": return o.includes("ivaActivo");
       case "red": return f.est === "red";
       case "nit": return o.includes("nit");
       case "mes": return o.includes("mes");
