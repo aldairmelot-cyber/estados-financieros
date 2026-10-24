@@ -10043,19 +10043,18 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       }
       // Solo lo que se adeuda a 31 de diciembre (saldo crédito); los saldos débito que queden se restan en una sola línea.
       const deben = lineas.filter((x) => x.v >= 0.5), favor = lineas.filter((x) => x.v <= -0.5);
-      const aoa = [["Cuenta", "Concepto del pasivo", "NIT o cédula", "DV", "Nombre o razón social", "Fecha de inicio de la obligación", "Saldo adeudado a 31-dic", "Objeto del pasivo (préstamos)", "Soporte de la forma como se recibió (préstamos)"]];
+      const aoa = [["Cuenta", "Concepto del pasivo", "NIT o cédula", "DV", "Nombre o razón social", "Fecha de inicio de la obligación", "Saldo adeudado a 31-dic"]];
       let total = 0;
       for (const x of deben.sort((a, b) => a.cod.localeCompare(b.cod) || b.v - a.v)) {
-        const prestamo = /^(21|2355)/.test(x.cod);
         const fi = x.imp ? `Impuesto del período (vence en ${X.y + 1})` : x.sinTercero ? "" : Math.abs(x.sa) >= 0.5 ? `Anterior al 1/01/${X.y} (saldo que viene de ${X.y - 1})` : primera.get(x.cod + "|" + x.nit) ? fechaC(primera.get(x.cod + "|" + x.nit)) : "";
-        aoa.push([x.cod, X.cta(x.cod), x.nit, dvNit(x.nit), x.imp ? x.nombre : x.sinTercero ? "Registrado en la cuenta sin tercero" : X.nom(x.nit), fi, r2a(x.v), prestamo ? "POR COMPLETAR" : "", prestamo ? "POR COMPLETAR" : ""]);
+        aoa.push([x.cod, X.cta(x.cod), x.nit, dvNit(x.nit), x.imp ? x.nombre : x.sinTercero ? "Registrado en la cuenta sin tercero" : X.nom(x.nit), fi, r2a(x.v)]);
         total += x.v;
       }
       const ajustes = [];
       const sf = favor.reduce((t, x) => t + x.v, 0);
       if (favor.length) ajustes.push([`(−) Saldos a favor de la empresa en cuentas de pasivo (${fmt(favor.length)}: anticipos a proveedores o pagos en exceso)`, sf]);
       const resumen = cierreRQ(aoa, total, ajustes, X, 45, 6);
-      return [{ nombre: "R45 Pasivos", titulo: `Renglón 45 – Saldos adeudados a 31 de diciembre de ${X.y}`, aoa, anchos: [11, 34, 13, 4, 40, 26, 18, 30, 30], resumen: { ...resumen, texto: `${fmt(deben.length)} obligaciones con saldo adeudado. Complete objeto y soporte de los préstamos (cuentas 21 y 2355).` } }];
+      return [{ nombre: "R45 Pasivos", titulo: `Renglón 45 – Saldos adeudados a 31 de diciembre de ${X.y}`, aoa, anchos: [11, 34, 13, 4, 40, 26, 18], resumen: { ...resumen, texto: `${fmt(deben.length)} obligaciones con saldo adeudado a 31 de diciembre.` } }];
     },
     ingresos(X) {
       const rows = relacionRQ(X, pref(["41", "42"], ["4175"]), (sa, d, c) => c - d);
@@ -10377,7 +10376,6 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         }
         if (it.tipo === "costos" && hs.length) { for (const h of hs) add(nombreRenglonRQ(q, it, h.resumen.renglon), libroRQ(q, [h], false)); hechos.push(it.n); }
         else if (hs.length) { add(nom("xlsx"), libroRQ(q, hs, false)); hechos.push(it.n); }
-        if (it.tipo === "pasivos") faltan.push(`${it.n}. En ${nom("xlsx")}, completar las columnas «POR COMPLETAR» (objeto y soporte de los préstamos) y adjuntar los soportes.`);
         if (it.tipo === "costos" || it.tipo === "retenciones" || it.tipo === "pasivos") for (const h of hs) if (h.resumen?.dif != null && Math.abs(h.resumen.dif) >= 1000) faltan.push(`${it.n}. ${h.nombre}: explicar la diferencia de $ ${fmt(h.resumen.dif)} frente al renglón ${h.resumen.renglon || ""} declarado (conciliación fiscal, formato 2516).`);
         if (it.tipo === "retenciones") faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista.`);
         if (it.tipo === "certificados") faltan.push(`${it.n}. Pedir y adjuntar el certificado tributario anual de cada entidad de ${nom("xlsx")}.`);
@@ -10618,7 +10616,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           case "eeff": t = `Se adjuntan los estados financieros del año gravable ${q.anio} (estado de situación financiera, estado de resultado integral, estado de cambios en el patrimonio, estado de flujos de efectivo y notas), firmados por el representante legal, el contador y el revisor fiscal.`; break;
           case "mayor": t = `Se adjunta copia escaneada del libro mayor y balances a 31 de diciembre de ${q.anio}, firmado, y los mismos saldos en Excel.`; break;
           case "balance": t = `Se adjunta en Excel el balance de prueba a 8 dígitos por tercero del 1 de enero al 31 de diciembre de ${q.anio}. ${r.texto || ""}`; break;
-          case "pasivos": t = `Se adjunta en Excel la relación de los saldos adeudados a 31 de diciembre de ${q.anio} por tercero, con la fecha de inicio de cada obligación, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 45${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}. Para los préstamos de dinero se indica el objeto y el soporte de la forma como se recibieron [COMPLETAR en el Excel: objeto y soporte de cada préstamo].`; break;
+          case "pasivos": t = `Se adjunta en Excel la relación de los saldos adeudados a 31 de diciembre de ${q.anio} por tercero, con la fecha de inicio de cada obligación, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 45${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}.`; break;
           case "ingresos": t = `Se adjunta en Excel la relación de los ingresos brutos por tercero acumulados a 31 de diciembre de ${q.anio}, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 58.`; break;
           case "devoluciones": t = `Se adjunta en Excel la relación de las devoluciones, rebajas y descuentos en ventas por tercero, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 59.`; break;
           case "compras": { const j = hs[1]?.resumen?.texto || ""; t = `Se adjunta en Excel la relación de compras de inventarios por proveedor del 1 de enero al 31 de diciembre de ${q.anio}, por ${m(r.total)}, y el cálculo del costo de ventas por juego de inventarios. ${j}`; break; }

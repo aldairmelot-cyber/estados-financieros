@@ -22,7 +22,7 @@ En **Requerimientos DIAN** se suelta el PDF del requerimiento tal como llega (si
 Con el balance por tercero del año (Años cerrados), el libro auxiliar (Consulta de movimientos) y la declaración de renta, la app genera los anexos en Excel, una hoja por numeral, cada una cuadrada contra el renglón declarado:
 
 - balance de prueba por tercero y mayor y balances;
-- pasivos (R45) con fecha de inicio, aumentos, abonos y saldo;
+- pasivos (R45): solo el saldo adeudado a 31 de diciembre por tercero, con su fecha de inicio;
 - ingresos brutos (R58) y devoluciones (R59) por tercero;
 - compras de inventario por proveedor y juego de inventarios;
 - costos y gastos (R62 a R66) por concepto y tercero, con el 50 % del GMF y las provisiones presentadas en el renglón 66;
