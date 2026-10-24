@@ -9987,7 +9987,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       if (ajustes.length) aoa.push(fila("Total después de ajustes", neto));
       aoa.push(fila(`Valor declarado renglón ${renglon}`, dec));
       if (dec != null) aoa.push(fila(Math.abs(dec - neto) < 1000 ? "Diferencia (redondeo de la declaración a miles)" : "Diferencia por explicar (complete con la conciliación fiscal, formato 2516)", dec - neto));
-      return { total, neto, declarado: dec, dif: dec == null ? null : dec - neto };
+      return { total, neto, declarado: dec, dif: dec == null ? null : dec - neto, renglon };
     }
     return { total, neto };
   }
@@ -10162,45 +10162,139 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     }
     return { X, hojas };
   }
-  async function excelRQ(q, soloN) {
-    try {
-      RQ.ocupado = "Preparando los anexos…"; render();
-      await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
-      if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
-      const { X, hojas } = await anexosRQ(q, soloN);
-      const e = S.cfg.empresa, wb = XLSX.utils.book_new(), usados = new Set();
-      const cab = (h) => [[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero}${q.fecha ? ` del ${fechaC(q.fecha)}` : ""}${q.expediente ? ` · Expediente ${q.expediente}` : ""}`], [`Año gravable ${q.anio} · Numeral ${h.it.n}: ${h.titulo || ""}`], []];
-      const idx = [];
-      for (const h of hojas) {
-        if (h.error) { idx.push([h.it.n, textoItem(h.it, q), "", null, null, null, h.error]); continue; }
-        let nom = `N${h.it.n} ${h.nombre}`.slice(0, 31); let k = 2; while (usados.has(nom)) nom = `${nom.slice(0, 28)} ${k++}`; usados.add(nom);
-        const ws = XLSX.utils.aoa_to_sheet([...cab(h), ...h.aoa]);
+  /* ---------- archivos para la DIAN: un archivo por numeral y un ZIP con todo */
+  const ARCH_RQ = { eeff: "Estados_financieros", mayor: "Mayor_y_balances", balance: "Balance_prueba_por_tercero", pasivos: "R45_Pasivos", ingresos: "R58_Ingresos_brutos", devoluciones: "R59_Devoluciones_rebajas_descuentos", compras: "R39_Compras_inventario_y_juego_inventarios", costos: "Costos_y_gastos_por_renglon", retenciones: "R106_Otras_retenciones", certificados: "Entidades_financieras_certificados", cambio: "Diferencia_en_cambio", otro: "Anexo" };
+  const nombreArchRQ = (q, it, ext) => `N${String(it.n).padStart(2, "0")}_${ARCH_RQ[it.tipo] || "Anexo"}${it.tipo === "costos" ? "_R" + String(it.renglones || "").split(/[^\d]+/).filter(Boolean).join("_R") : ""}_AG${q.anio}.${ext}`;
+  const cabRQ = (q, h) => { const e = S.cfg.empresa; return [[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero}${q.fecha ? ` del ${fechaC(q.fecha)}` : ""}${q.expediente ? ` · Expediente ${q.expediente}` : ""}`], [`Año gravable ${q.anio} · Numeral ${h.it.n}: ${h.titulo || ""}`], []]; };
+  /** Libro de Excel con las hojas dadas (y el índice, si se pide). Devuelve los bytes. */
+  function libroRQ(q, hojas, conIndice, soloIndice = false) {
+    const e = S.cfg.empresa, wb = XLSX.utils.book_new(), usados = new Set(), idx = [];
+    for (const h of hojas) {
+      if (h.error) { idx.push([h.it.n, textoItem(h.it, q), "", null, null, null, h.error]); continue; }
+      let nom = (conIndice ? `N${h.it.n} ${h.nombre}` : h.nombre).slice(0, 31); let k = 2; while (usados.has(nom)) nom = `${nom.slice(0, 28)} ${k++}`; usados.add(nom);
+      if (soloIndice) nom = nombreArchRQ(q, h.it, "xlsx") + (hojas.filter((x) => x.it === h.it).length > 1 ? ` · hoja ${h.nombre}` : "");
+      else {
+        const ws = XLSX.utils.aoa_to_sheet([...cabRQ(q, h), ...h.aoa]);
         ws["!cols"] = h.anchos.map((w) => ({ wch: w }));
         XLSX.utils.book_append_sheet(wb, ws, nom);
-        const r = h.resumen || {};
-        idx.push([h.it.n, textoItem(h.it, q).slice(0, 250), nom, r.neto ?? r.total ?? null, r.declarado ?? null, r.dif ?? null, r.texto || ""]);
       }
-      for (const it of q.items) if ((soloN == null || it.n === soloN) && (it.tipo === "eeff" || it.tipo === "otro")) idx.push([it.n, textoItem(it, q).slice(0, 250), "", null, null, null, it.tipo === "eeff" ? "Adjuntar los estados financieros firmados (Años cerrados → PDF)." : "Documento por adjuntar."]);
+      const r = h.resumen || {};
+      idx.push([h.it.n, textoItem(h.it, q).slice(0, 250), nom, r.neto ?? r.total ?? null, r.declarado ?? null, r.dif ?? null, r.texto || ""]);
+    }
+    if (conIndice) {
+      for (const it of q.items) if (it.estado !== "noaplica" && (it.tipo === "eeff" || it.tipo === "otro")) idx.push([it.n, textoItem(it, q).slice(0, 250), "", null, null, null, it.tipo === "eeff" ? `Archivo ${nombreArchRQ(q, it, "pdf")}: imprimir, firmar y escanear.` : "Documento por adjuntar."]);
       idx.sort((a, b) => a[0] - b[0]);
-      const wi = XLSX.utils.aoa_to_sheet([[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero} – ${q.impuesto} año gravable ${q.anio}`], [], ["Numeral", "Solicitud", "Hoja", "Total relacionado", "Valor declarado", "Diferencia", "Observación"], ...idx]); wi["!cols"] = [8, 70, 26, 18, 18, 16, 60].map((w) => ({ wch: w }));
+      const wi = XLSX.utils.aoa_to_sheet([[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero} – ${q.impuesto} año gravable ${q.anio}`], [], ["Numeral", "Solicitud", "Hoja o archivo", "Total relacionado", "Valor declarado", "Diferencia", "Observación"], ...idx]);
+      wi["!cols"] = [8, 70, soloIndice ? 60 : 26, 18, 18, 16, 60].map((w) => ({ wch: w }));
       XLSX.utils.book_append_sheet(wb, wi, "Indice");
-      wb.SheetNames.unshift(wb.SheetNames.pop());
-      const data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true, bookSST: true });
+      if (!soloIndice) wb.SheetNames.unshift(wb.SheetNames.pop());
+    }
+    return XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true, bookSST: true });
+  }
+  async function libreriasRQ(conPdf) {
+    await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
+    if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
+    if (!conPdf) return;
+    await asegurarLibreria("jspdf", ["https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", "https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"]);
+    if (window.jspdf && !window.jspdf.jsPDF.API.autoTable) await new Promise((ok) => { const sc = document.createElement("script"); sc.src = "https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"; sc.onload = ok; sc.onerror = ok; document.head.appendChild(sc); });
+  }
+  /** Estados financieros del año en PDF (Años cerrados). Devuelve un Blob o lanza un error con la razón. */
+  function pdfEEFFRQ(anio) {
+    if (!window.jspdf || !window.jspdf.jsPDF.API.autoTable) throw new Error("No se pudo cargar la librería de PDF.");
+    const D = calcularAnual(anio);
+    if (!D) throw new Error(`Falta el balance por tercero de ${anio} en Años cerrados para armar los estados financieros.`);
+    return conPeriodo(`${anio}-12`, () => construirPDF(["esf", "eri", "ecp", "efe", "ind", "notas"], D));
+  }
+  /** Lo que se pudo generar queda como avance del numeral. */
+  async function avanceRQ(q, ns) {
+    let cambio = false;
+    for (const it of q.items) if (ns.includes(it.n) && it.estado === "pendiente") { it.estado = "proceso"; cambio = true; }
+    if (cambio) { await guardarRQ(q); render(); }
+  }
+  async function excelRQ(q) {
+    try {
+      RQ.ocupado = "Preparando los anexos…"; render();
+      await libreriasRQ(false);
+      const { hojas } = await anexosRQ(q);
+      const data = libroRQ(q, hojas, true);
       RQ.ocupado = ""; render();
-      await guardarArchivo(soloN == null ? `Anexos_requerimiento_${q.numero}_AG${q.anio}.xlsx` : `Anexo_N${soloN}_requerimiento_${q.numero}.xlsx`, data);
-      // Lo que se pudo generar queda como avance del numeral.
-      let cambio = false;
-      for (const h of hojas) if (!h.error && h.it.estado === "pendiente") { h.it.estado = "proceso"; cambio = true; }
-      if (cambio) { await guardarRQ(q); render(); }
+      await guardarArchivo(`Anexos_requerimiento_${q.numero}_AG${q.anio}.xlsx`, data);
+      await avanceRQ(q, hojas.filter((h) => !h.error).map((h) => h.it.n));
     } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `No se pudieron generar los anexos: ${err.message}`; render(); }
+  }
+  /** Descarga el archivo de un numeral: PDF de los estados financieros o Excel del anexo. */
+  async function archivoNumeralRQ(q, n) {
+    const it = q.items.find((x) => x.n === n); if (!it) return;
+    try {
+      RQ.error = ""; RQ.ocupado = `Preparando el numeral ${n}…`; render();
+      if (it.tipo === "eeff") {
+        await libreriasRQ(true);
+        const data = pdfEEFFRQ(q.anio);
+        RQ.ocupado = ""; render();
+        await guardarArchivo(nombreArchRQ(q, it, "pdf"), data);
+      } else {
+        await libreriasRQ(false);
+        const { hojas } = await anexosRQ(q, n);
+        const err = hojas.find((h) => h.error);
+        if (err) throw new Error(err.error);
+        if (!hojas.length) throw new Error("Este numeral no tiene un anexo que se pueda generar: adjunte el documento.");
+        const data = libroRQ(q, hojas, false);
+        RQ.ocupado = ""; render();
+        await guardarArchivo(nombreArchRQ(q, it, "xlsx"), data);
+      }
+      await avanceRQ(q, [n]);
+    } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `Numeral ${n}: ${err.message}`; render(); }
+  }
+  /** Todo lo que pide el requerimiento en un ZIP: un archivo por numeral, el índice, la carta y una guía de lo que falta adjuntar. */
+  async function zipRQ(q) {
+    try {
+      RQ.error = ""; RQ.ocupado = "Preparando los archivos del requerimiento…"; render();
+      await libreriasRQ(true);
+      const A = await anexosRQ(q);
+      const CFB = XLSX.CFB, zip = CFB.utils.cfb_new();
+      const carpeta = `Respuesta_${q.numero}_AG${q.anio}`;
+      const add = (nombre, bytes) => CFB.utils.cfb_add(zip, `${carpeta}/${nombre}`, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+      const texto = (t) => new TextEncoder().encode(t.replace(/\n/g, "\r\n"));
+      const hechos = [], faltan = [];
+      for (const it of q.items) {
+        if (it.estado === "noaplica") continue;
+        const nom = (ext) => nombreArchRQ(q, it, ext);
+        if (it.tipo === "eeff") {
+          try { add(nom("pdf"), await pdfEEFFRQ(q.anio).arrayBuffer()); hechos.push(it.n); faltan.push(`${it.n}. ${nom("pdf")}: imprimir, firmar (representante legal, contador y revisor fiscal) y escanear. Si ya tienen los estados financieros aprobados y firmados de ${q.anio}, envíen esos.`); }
+          catch (err) { faltan.push(`${it.n}. Estados financieros: ${err.message}`); }
+          continue;
+        }
+        const hs = A.hojas.filter((h) => h.it === it);
+        const err = hs.find((h) => h.error);
+        if (err) { faltan.push(`${it.n}. ${TIPO_RQ[it.tipo] || "Anexo"}: no se pudo generar (${err.error})`); continue; }
+        if (hs.length) { add(nom("xlsx"), libroRQ(q, hs, false)); hechos.push(it.n); }
+        if (it.tipo === "mayor") faltan.push(`${it.n}. Adjuntar la copia escaneada del libro mayor y balances oficial (impreso del software contable). El Excel ${nom("xlsx")} es un soporte adicional.`);
+        if (it.tipo === "pasivos") faltan.push(`${it.n}. En ${nom("xlsx")}, completar las columnas «POR COMPLETAR» (objeto y soporte de los préstamos) y adjuntar los soportes.`);
+        if (it.tipo === "costos" || it.tipo === "retenciones" || it.tipo === "pasivos") for (const h of hs) if (h.resumen?.dif != null && Math.abs(h.resumen.dif) >= 1000) faltan.push(`${it.n}. ${h.nombre}: explicar la diferencia de $ ${fmt(h.resumen.dif)} frente al renglón ${h.resumen.renglon || ""} declarado (conciliación fiscal, formato 2516).`);
+        if (it.tipo === "retenciones") faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista.`);
+        if (it.tipo === "certificados") faltan.push(`${it.n}. Pedir y adjuntar el certificado tributario anual de cada entidad de ${nom("xlsx")}.`);
+        if (it.tipo === "cambio") faltan.push(`${it.n}. Confirmar que no hubo operaciones en moneda extranjera antes de responder que no hay diferencia en cambio.`);
+        if (it.tipo === "otro") faltan.push(`${it.n}. ${textoItem(it, q)}`);
+      }
+      add(`00_Indice_anexos_AG${q.anio}.xlsx`, libroRQ(q, A.hojas, true, true));
+      const html = await cartaRQ(q, A, true);
+      add(`00_Carta_respuesta_${q.numero}.doc`, texto("﻿" + html));
+      faltan.push("Certificado de existencia y representación legal (para acreditar la representación, arts. 555 y 559 E.T.).", "Revisar la carta: completar los campos [COMPLETAR], firmar y enviar en PDF.");
+      const venc = venceRQ(q);
+      add("LEAME_que_falta_adjuntar.txt", texto(`Requerimiento ordinario No. ${q.numero} – ${q.impuesto} año gravable ${q.anio}\n${venc ? `Plazo: ${fechaLarga(venc)}\n` : ""}Responder a: ${q.correo || ""}${q.copia ? ` con copia a ${q.copia}` : ""}\nAsunto: Respuesta Requerimiento Ordinario No. ${q.numero}${q.proyecto ? ` – Proyectó: ${q.proyecto}` : ""}\n\nArchivos generados por la app: numerales ${hechos.join(", ") || "—"}.\n\nPendiente antes de enviar:\n${faltan.map((f) => `- ${f}`).join("\n")}\n`));
+      const data = CFB.write(zip, { fileType: "zip", type: "array", compression: true });
+      RQ.ocupado = ""; render();
+      await guardarArchivo(`${carpeta}.zip`, new Uint8Array(data));
+      await avanceRQ(q, hechos);
+    } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `No se pudieron preparar los archivos: ${err.message}`; render(); }
   }
 
   /* ---------- carta de respuesta (Word) */
-  async function cartaRQ(q) {
+  async function cartaRQ(q, A0 = null, soloHtml = false) {
     try {
-      RQ.ocupado = "Preparando la carta…"; render();
-      let A = null;
-      try { A = await anexosRQ(q); } catch (err) { A = { hojas: [], err: err.message }; }
+      if (!soloHtml) { RQ.ocupado = "Preparando la carta…"; render(); }
+      let A = A0;
+      if (!A) { try { A = await anexosRQ(q); } catch (err) { A = { hojas: [], err: err.message }; } }
       const e = S.cfg.empresa, fir = firmantes(`${q.anio}-12`), rep = fir.find((f) => /representante|gerente/i.test(f.cargo)) || fir[0];
       const porN = (n) => (A.hojas || []).filter((h) => h.it.n === n && !h.error);
       const m = (v) => (v == null ? "—" : "$ " + fmt(v));
@@ -10233,13 +10327,14 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         Expediente: ${esc(q.expediente || "")}<br>Contribuyente: ${esc(e.razon)} – NIT ${esc(e.nit)}<br>${esc(q.impuesto)} – Año gravable ${q.anio}</p><br>
         <p>${esc(rep?.nombre || "")}, identificada con cédula de ciudadanía No. [COMPLETAR], en calidad de ${esc(rep?.cargo || "representante legal")} de ${esc(e.razon)}, sociedad identificada con NIT ${esc(e.nit)}, según el certificado de existencia y representación legal que se adjunta, y dentro del término señalado en el artículo 686 del Estatuto Tributario, doy respuesta al requerimiento de la referencia en el orden en que fue formulado:</p>
         ${parr}
-        <p><b>Anexos:</b> archivo en Excel «Anexos_requerimiento_${esc(q.numero)}_AG${q.anio}.xlsx» con una hoja por numeral; estados financieros firmados; copia del libro mayor y balances; certificados de retención y certificados tributarios de las entidades financieras; certificado de existencia y representación legal.</p><br>
+        <p><b>Anexos:</b> un archivo por numeral (${q.items.filter((it) => it.estado !== "noaplica" && it.tipo !== "otro").map((it) => esc(nombreArchRQ(q, it, it.tipo === "eeff" ? "pdf" : "xlsx"))).join(", ")}); estados financieros firmados; copia del libro mayor y balances; certificados de retención y certificados tributarios de las entidades financieras; certificado de existencia y representación legal.</p><br>
         <p>Atentamente,</p><br><br><p><b>${esc(rep?.nombre || "")}</b><br>${esc(rep?.cargo || "Representante legal")}<br>${esc(e.razon)} – NIT ${esc(e.nit)}<br>Dirección: CR 13 A 22 26 BRR ALCAZARES, Santa Marta · contabilidad@districlinicas.com</p>
         ${A.err ? `<p style="color:#b42318">Nota interna (borrar antes de enviar): no se pudieron calcular los totales de los anexos: ${esc(A.err)}</p>` : ""}
         </body></html>`;
+      if (soloHtml) return html;
       RQ.ocupado = ""; render();
       await guardarArchivo(`Respuesta_requerimiento_${q.numero}.doc`, new Blob(["﻿", html], { type: "application/msword" }));
-    } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `No se pudo preparar la carta: ${err.message}`; render(); }
+    } catch (err) { if (soloHtml) throw err; console.error(err); RQ.ocupado = ""; RQ.error = `No se pudo preparar la carta: ${err.message}`; render(); }
   }
 
   /* ---------- PDF del requerimiento */
@@ -10312,14 +10407,14 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     const inp = (k, t, tipo = "text") => `<label>${t}<input type="${tipo}" data-rqc="${k}" value="${esc(q[k] ?? "")}"></label>`;
     return `<section class="panel cq-compro"><div class="fila" style="justify-content:space-between;align-items:flex-start">
         <div><h2>Requerimiento ${esc(q.numero)}</h2><p class="sub" style="margin:0">${esc(q.impuesto)} · año gravable ${y}${q.fecha ? ` · del ${esc(fechaLarga(q.fecha))}` : ""} · ${chipVence(q)}</p></div>
-        <div class="fila"><button class="btn primario" data-rq="excel" data-id="${esc(q.numero)}">Anexos en Excel</button><button class="btn" data-rq="carta" data-id="${esc(q.numero)}">Carta de respuesta (Word)</button>
+        <div class="fila"><button class="btn primario" data-rq="zip" data-id="${esc(q.numero)}">Descargar todo (ZIP)</button><button class="btn" data-rq="excel" data-id="${esc(q.numero)}">Anexos en un solo Excel</button><button class="btn" data-rq="carta" data-id="${esc(q.numero)}">Carta de respuesta (Word)</button>
           ${q.pdf ? `<button class="btn" data-rq="pdf" data-id="${esc(q.numero)}">PDF recibido</button>` : `<button class="btn" data-rq="subir-pdf">Guardar el PDF recibido</button>`}</div></div>
       <div class="cq-filtros" style="margin-top:12px">${inp("fecha", "Fecha del requerimiento", "date")}${inp("notificado", "Fecha de notificación", "date")}${inp("plazo", "Plazo (días calendario)", "number")}${inp("expediente", "Expediente")}${inp("proyecto", "Funcionario que proyectó")}${inp("correo", "Correo de respuesta")}${inp("copia", "Con copia a")}${inp("radicado", "Radicado de la respuesta")}</div>
-      <p class="pie">Vence a los ${q.plazo || 15} días calendario de la notificación${venceRQ(q) ? `: <b>${esc(fechaLarga(venceRQ(q)))}</b>` : ""}. No responder a tiempo acarrea la sanción del artículo 651 del Estatuto Tributario.</p>
+      <p class="pie"><b>Descargar todo (ZIP)</b> trae un archivo por numeral con el nombre que pide la DIAN, la carta de respuesta y una lista de lo que falta adjuntar (firmas, escaneos y certificados). Vence a los ${q.plazo || 15} días calendario de la notificación${venceRQ(q) ? `: <b>${esc(fechaLarga(venceRQ(q)))}</b>` : ""}. No responder a tiempo acarrea la sanción del artículo 651 del Estatuto Tributario.</p>
       <h3 style="margin:14px 0 6px">Información del año ${y} que usan los anexos</h3><ul class="hallazgos">${falta(tieneAn, `Balance por tercero ${y} (Años cerrados)`, "anual:cargar")}${falta(tieneLibro, `Libro auxiliar ${y} (para pasivos, compras y retenciones)`, "consulta:resumen")}${falta(Boolean(decl), `Declaración de renta ${y}${decl ? ` (formulario ${esc(decl.formulario)})` : ""}`, "renta")}</ul></section>
       <section class="panel"><h2>Numerales</h2><div class="tabla-env"><table class="lista cq"><thead><tr><th>N.°</th><th>Solicitud</th><th>Anexo</th><th>Estado</th><th>Responsable</th><th>Notas</th></tr></thead><tbody>
       ${q.items.map((it, i) => `<tr><td><b>${it.n}</b></td><td class="cq-conc" style="max-width:420px">${esc(textoItem(it, q))}</td>
-        <td>${esc(TIPO_RQ[it.tipo] || it.tipo)}${GEN_RQ[it.tipo] && !["eeff", "otro"].includes(it.tipo) ? `<br><button class="btn chico" data-rq="excel-n" data-id="${esc(q.numero)}" data-n="${it.n}">Excel</button>` : it.tipo === "eeff" ? `<br><button class="btn chico" data-rq="eeff" data-anio="${y}">Ver estados</button>` : ""}</td>
+        <td>${esc(TIPO_RQ[it.tipo] || it.tipo)}${it.tipo === "otro" ? "<small>Documento por adjuntar</small>" : `<br><button class="btn chico" data-rq="archivo-n" data-id="${esc(q.numero)}" data-n="${it.n}" title="${esc(nombreArchRQ(q, it, it.tipo === "eeff" ? "pdf" : "xlsx"))}">Descargar ${it.tipo === "eeff" ? "PDF" : "Excel"}</button>${it.tipo === "eeff" ? ` <button class="btn chico" data-rq="eeff" data-anio="${y}">Ver</button>` : ""}`}</td>
         <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select></td>
         <td><input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" style="width:120px" aria-label="Responsable"></td>
         <td><textarea data-rqi="${i}" data-k="notas" rows="2" style="min-width:200px" aria-label="Notas">${esc(it.notas || "")}</textarea></td></tr>`).join("")}
@@ -10337,7 +10432,8 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     else if (a === "crear") crearRQ();
     else if (a === "abrir") { RQ.sel = t.dataset.id; RQ.nuevo = null; RQ.error = ""; render(); }
     else if (a === "excel" && q) excelRQ(q);
-    else if (a === "excel-n" && q) excelRQ(q, Number(t.dataset.n));
+    else if (a === "archivo-n" && q) archivoNumeralRQ(q, Number(t.dataset.n));
+    else if (a === "zip" && q) zipRQ(q);
     else if (a === "carta" && q) cartaRQ(q);
     else if (a === "pdf" && q) bajarPdfRQ(q);
     else if (a === "subir-pdf") $("#archivo-rq").click();
