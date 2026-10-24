@@ -388,6 +388,7 @@ table.dn th.dn-grp { text-align: center; border-bottom: 1px solid var(--linea); 
 .cq-chk { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; }
 .cq-filtros .cq-chk label, label.cq-chk { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; color: var(--tinta); font-size: 13px; white-space: nowrap; }
 .cq-filtros .cq-chk { grid-column: 1 / -1; }
+.btn[aria-pressed="true"] { background: var(--acento); color: var(--sobre-acento); border-color: var(--acento); }
 .cq-link { border: 0; background: none; padding: 0; color: var(--acento); font: inherit; font-weight: 600; cursor: pointer; text-align: left; white-space: nowrap; }
 .cq-link:hover { text-decoration: underline; }
 table.cq td small, table.cq td .cq-link + small { display: block; color: var(--suave); font-size: 11.5px; }
@@ -437,6 +438,8 @@ table.cq small.neg, .lista small.neg { color: var(--error); display: block; }
 <input type="file" id="archivo-pv" accept=".pdf" multiple hidden>
 <input type="file" id="archivo-dn" accept=".xlsx,.xls,.xlsm" multiple hidden>
 <input type="file" id="archivo-cq" accept=".xlsx,.xlsm" multiple hidden>
+<input type="file" id="archivo-an" accept=".xls,.xlsx" multiple hidden>
+<input type="file" id="archivo-rt" accept=".pdf" multiple hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -4163,7 +4166,7 @@ const VerifDian = (() => {
     db: null, dbListo: false, cargando: true, confirmar: null, sedeVista: "mes", borrador: null, sucio: false,
   };
   const TABS = [["inicio", "Panel"], ["cargar", "Cargar archivo"], ["revision", "Revisión"], ["esf", "Situación financiera"], ["eri", "Resultados"],
-    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["dian", "Verificación DIAN"], ["consulta", "Consulta del libro auxiliar"], ["config", "Configuración"]];
+    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["dian", "Verificación DIAN"], ["consulta", "Consulta del libro auxiliar"], ["anual", "Años cerrados"], ["renta", "Declaraciones de renta"], ["config", "Configuración"]];
 
   const ICO = {
     inicio: '<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/>',
@@ -4173,6 +4176,7 @@ const VerifDian = (() => {
     cartera: '<path d="M3 7h18v12H3z"/><path d="M3 11h18M16 15h2"/>',
     datos: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
     dian: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+    anual: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M7.5 14h4M7.5 17h7"/>',
     consulta: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2M8.5 11h5M11 8.5v5"/>',
     bancos: '<path d="M3 10h18L12 4z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
   };
@@ -4181,9 +4185,10 @@ const VerifDian = (() => {
   const NAV = [
     { g: null, items: [["inicio", "Panel general", "inicio"]] },
     { g: "Informes financieros", ico: "informes", items: [["esf", "Situación financiera"], ["eri", "Resultados integrales"], ["ecp", "Cambios en el patrimonio"], ["efe", "Flujos de efectivo"], ["notas", "Notas a los estados"], ["ind", "Indicadores financieros"], ["dictamen", "Dictamen del revisor fiscal"], ["exportar", "Paquete completo (PDF/Excel)"]] },
+    { g: "Años cerrados (2023 y 2024)", ico: "anual", items: [["anual:cargar", "Cargar balance anual por tercero"], ["anual:esf", "Situación financiera"], ["anual:eri", "Resultados integrales"], ["anual:ecp", "Cambios en el patrimonio"], ["anual:efe", "Flujos de efectivo"], ["anual:ind", "Indicadores"], ["anual:notas", "Notas"], ["anual:terceros", "Saldos por tercero (DIAN)"]] },
     { g: "Consulta de movimientos", ico: "consulta", items: [["consulta:resumen", "Libros auxiliares cargados"], ["consulta:movs", "Movimientos por cuenta"], ["consulta:comp", "Comprobantes"], ["consulta:cuadre", "Cuadre con el balance"]] },
     { g: "Gestión", ico: "gestion", items: [["sede:lineal", "Resultados por sede mes a mes"], ["sede:mes", "Resultados por sede · mes"], ["sede:acum", "Resultados por sede · año"]] },
-    { g: "Impuestos", ico: "impuestos", items: [["impuestos:ret", "Retención en la fuente (350)"], ["impuestos:iva", "IVA (300)"], ["impuestos:ica", "Industria y comercio (ICA)"], ["impuestos:res:anio", "Resumen del año"], ["impuestos:res:conc", "Conciliación de ingresos"], ["impuestos:res:comp", "Ajustes próxima declaración"], ["impuestos:res:renta", "Proyección de renta"]] },
+    { g: "Impuestos", ico: "impuestos", items: [["impuestos:ret", "Retención en la fuente (350)"], ["impuestos:iva", "IVA (300)"], ["impuestos:ica", "Industria y comercio (ICA)"], ["impuestos:res:anio", "Resumen del año"], ["impuestos:res:conc", "Conciliación de ingresos"], ["impuestos:res:comp", "Ajustes próxima declaración"], ["impuestos:res:renta", "Proyección de renta"], ["renta", "Declaraciones de renta presentadas (110)"]] },
     { g: "Verificación DIAN", ico: "dian", items: [["dian:resumen", "Resumen y carga de archivos"], ["dian:pendientes", "Por registrar en el software"], ["dian:diferencias", "Diferencias de valor e IVA"], ["dian:libros", "En el software sin la DIAN"], ["dian:detalle", "Consultar documentos"]] },
     { g: "Tesorería", ico: "bancos", items: [["bancos:resumen", "Conciliaciones bancarias"], ["bancos:cargar", "Cargar libro y extracto"], ["bancos:config", "Parámetros de conciliación"]] },
     { g: "Cartera y proveedores", ico: "cartera", items: [["terceros:cxc", "Cuentas por cobrar"], ["terceros:cxp", "Cuentas por pagar"], ["prov", "Proveedores por pagar (vencimientos)"]] },
@@ -4196,6 +4201,7 @@ const VerifDian = (() => {
     if (S.tab === "bancos") return `bancos:${S.bc.vista === "detalle" ? "resumen" : S.bc.vista}`;
     if (S.tab === "dian") return `dian:${S.dn.vista}`;
     if (S.tab === "consulta") return `consulta:${S.cq.vista}`;
+    if (S.tab === "anual") return `anual:${S.an.vista}`;
     return S.tab;
   }
   function navegar(dest) {
@@ -4206,6 +4212,7 @@ const VerifDian = (() => {
     if (tab === "terceros" && a) S.terVer = a;
     if (tab === "sede" && a) S.sedeVista = a;
     if (tab === "dian" && a) { S.dn.vista = a; S.dn.confirmar = null; S.dn.limite = 300; }
+    if (tab === "anual" && a) { S.an.vista = a; S.an.confirmar = null; S.an.limite = 300; }
     if (tab === "consulta" && a) { S.cq.vista = a; S.cq.confirmar = null; S.cq.limite = 300; }
     if (tab === "bancos" && a) { S.bc.vista = a; S.bc.confirmar = null; if (a === "config") { S.bc.borrador = null; S.bc.sucio = false; } }
     $(".app")?.classList.remove("menu-abierto");
@@ -4624,7 +4631,7 @@ const VerifDian = (() => {
   function vistaCargar() {
     let html = `<section class="panel"><h2>Cargar balance del mes</h2>
       <p class="sub">Archivo “Balance General por Centros de Costos” (.xls o .xlsx). Puede ser mensual (del 1 al último día del mes) o acumulado (desde el 1 de enero).</p>
-      <div class="zona" id="zona" tabindex="0" role="button" aria-label="Seleccionar archivo"><b>Arrastre aquí el archivo o haga clic para buscarlo</b><span>FunBalanceTotalRegimen….xls · o el balance por tercero FunBalanceTotalNit….xls (para un año cerrado sirve como balance del período; si el mes ya tiene balance, alimenta la cartera y los proveedores)</span></div>
+      <div class="zona" id="zona" tabindex="0" role="button" aria-label="Seleccionar archivo"><b>Arrastre aquí el archivo o haga clic para buscarlo</b><span>FunBalanceTotalRegimen….xls · o el balance por tercero FunBalanceTotalNit….xls del mes, para la cartera y los proveedores. El balance por tercero de un año completo va a «Años cerrados».</span></div>
       ${S.errorCarga ? `<div class="aviso error" style="margin-top:12px"><p>${esc(S.errorCarga)}</p></div>` : ""}
     </section>`;
     const P = S.pendiente;
@@ -4633,7 +4640,6 @@ const VerifDian = (() => {
       const nitCfg = S.cfg.empresa.nit.replace(/\D/g, ""), nitArch = b.nit.replace(/\D/g, "");
       html += `<section class="panel"><h2>${esc(b.archivo)}</h2>
         <p class="sub">Del ${esc(fechaLarga(b.desde))} al ${esc(fechaLarga(b.hasta))} · archivo <b>${esc(b.tipo)}</b> · ${b.filas.size} cuentas · ${b.centros.length ? `centros: ${b.centros.map((c) => esc(c.nombre)).join(", ")}` : "sin centros de costo"}</p>
-        ${P.T ? `<div class="aviso info"><p>Es un <b>balance por tercero</b> (Libro de Inventario por Nit). Se guardan los totales de cada cuenta como balance de ${esc(b.periodo)} para los estados financieros, y el detalle de ${fmt(P.T.rows.length)} saldos por tercero para Cartera y proveedores. Al no traer centros de costo, los informes por sede de este período quedan sin datos.</p></div>` : ""}
         ${nitArch && nitCfg && nitArch !== nitCfg ? `<div class="aviso error"><p>El NIT del archivo (${esc(b.nit)}) no coincide con el de la empresa configurada (${esc(S.cfg.empresa.nit)}).</p></div>` : ""}
         <div class="fila" style="justify-content:space-between;margin:10px 0">${resumenControles(P.V)}</div>
         ${existe && S.confirmar !== "reemplazar" ? `<div class="aviso advertencia"><p>Ya existe ${esc(b.periodo)} en el histórico (archivo ${esc(existe.archivo)}). Si hubo ajustes contables, puede reemplazarlo.</p></div>` : ""}
@@ -5472,7 +5478,14 @@ const VerifDian = (() => {
   /* ------------------------------------------------------------ resumen anual y proyección de renta */
   function cfgRenta(anio) {
     const r = S.cfg.impuestos.renta || {};
-    return mezclar(mezclar(CFG_DEF.impuestos.renta.base, r.base || {}), mezclar(CFG_DEF.impuestos.renta[anio] || {}, r[anio] || {}));
+    const c = mezclar(mezclar(CFG_DEF.impuestos.renta.base, r.base || {}), mezclar(CFG_DEF.impuestos.renta[anio] || {}, r[anio] || {}));
+    // Si la declaración del año anterior está guardada en "Declaraciones de renta", sus renglones son la referencia.
+    const d = typeof rentaVigente === "function" ? rentaVigente(anio - 1) : null;
+    if (d) {
+      const R = Object.fromEntries(Object.entries(d.R).map(([k, v]) => [Number(k), v]));
+      return { ...c, anterior: R, impuestoNetoAnterior: R[96] ?? c.impuestoNetoAnterior, anticipoAnterior: R[108] ?? c.anticipoAnterior, saldoFavorAnterior: R[114] ?? c.saldoFavorAnterior, formularioAnterior: d.formulario };
+    }
+    return c;
   }
   function datosRenta(periodo = S.periodo) {
     const ctx = Motor.contexto(S.hist, periodo, S.cfg), R = Motor.eri(ctx);
@@ -6307,7 +6320,7 @@ const VerifDian = (() => {
     if (S.cargando) { v.innerHTML = '<section class="panel"><p class="vacio">Cargando el histórico…</p></section>'; return; }
     let D = null;
     try { D = calcular(); } catch (err) { console.error(err); }
-    const vistas = { dian: () => vistaDian(), consulta: () => vistaConsulta(), prov: () => vistaProveedores(), bancos: () => vistaBancos(), inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
+    const vistas = { dian: () => vistaDian(), consulta: () => vistaConsulta(), anual: () => vistaAnual(), renta: () => vistaRenta(), prov: () => vistaProveedores(), bancos: () => vistaBancos(), inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
     try { v.innerHTML = (vistas[S.tab] || vistaInicio)(D); } catch (err) {
       console.error(err);
       v.innerHTML = `<div class="aviso error"><p>No se pudo mostrar esta sección: ${esc(err.message)}</p></div>`;
@@ -6338,16 +6351,14 @@ const VerifDian = (() => {
       const wb = XLSX.read(buf, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const filas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
-      let T = null;
       if (Motor.filaEncTerceros(filas) >= 0) {
-        try { T = Motor.interpretarTerceros(filas, file.name); } catch (err) { T = null; }
-        // Si el mes ya tiene su balance (con centros de costo), el archivo por tercero solo alimenta la cartera.
-        const per = T ? T.periodo : null;
-        if (T && S.hist.has(per)) { await guardarTerceros(T); return; }
+        // Balance por tercero de un año completo (1 de enero a 31 de diciembre): va aparte, a "Años cerrados".
+        if (esAnualNit(filas)) { prepararAnual(filas, file.name); return; }
+        await guardarTerceros(Motor.interpretarTerceros(filas, file.name)); return;
       }
       const b = Motor.interpretar(filas, file.name);
       const V = Motor.validar(b, [...S.hist.keys()].filter((p) => p !== b.periodo), S.cfg.mapeo, { tolRedondeo: S.cfg.tolRedondeo });
-      S.pendiente = { b, V, T };
+      S.pendiente = { b, V };
     } catch (err) {
       S.pendiente = null;
       S.errorCarga = err instanceof Motor.ErrorLectura ? err.message : `No se pudo leer el archivo: ${err.message}`;
@@ -6367,16 +6378,15 @@ const VerifDian = (() => {
     render();
   }
   async function guardarPendiente() {
-    const { b, T } = S.pendiente;
+    const { b } = S.pendiente;
     b.cargado = new Date().toISOString();
     if (S.db) {
       try { await S.db.doc("meses/" + b.periodo).set({ ...Motor.aDocumento(b), cargado: b.cargado }); }
       catch (err) { toast(err.code === "quota_exceeded" ? "No hay espacio en el histórico. Elimine meses antiguos." : `No se pudo guardar: ${err.message || err.code}`); return; }
     }
     S.hist.set(b.periodo, b);
-    if (T) { try { await guardarTerceros(T, { silencioso: true }); } catch (err) { toast(`El balance se guardó, pero no los saldos por tercero: ${err.message}`); } }
     S.periodo = b.periodo; S.pendiente = null; S.confirmar = null;
-    toast(`${mesNombre(b.periodo)} ${b.periodo.slice(0, 4)} guardado${T ? ", con los saldos por tercero para la cartera" : ""}.`);
+    toast(`${mesNombre(b.periodo)} ${b.periodo.slice(0, 4)} guardado.`);
     ir("revision");
   }
   async function borrarPeriodo(p) {
@@ -9054,9 +9064,12 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
 
   /* ---------- cuadre del libro contra el balance de prueba */
   function balanceCQ(anio, hastaLibro) {
-    const ps = [...S.hist.keys()].filter((p) => p.startsWith(`${anio}-`) && p <= hastaLibro.slice(0, 7)).sort();
+    let H = S.hist;
+    let ps = [...H.keys()].filter((p) => p.startsWith(`${anio}-`) && p <= hastaLibro.slice(0, 7)).sort();
+    // Años cerrados: si el año no tiene meses, se usa su balance anual por tercero.
+    if (!ps.length && S.an.docs.has(anio) && hastaLibro.slice(0, 7) >= `${anio}-12`) { H = new Map([[`${anio}-12`, S.an.docs.get(anio).b]]); ps = [`${anio}-12`]; }
     if (!ps.length) return null;
-    const ult = ps.at(-1), b = S.hist.get(ult), m = Number(ult.slice(5, 7));
+    const ult = ps.at(-1), b = H.get(ult), m = Number(ult.slice(5, 7));
     const hijos = (bb) => {
       if (bb.__hijos) return bb.__hijos;
       const H = new Map();
@@ -9075,7 +9088,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (b.tipo === "acumulado") modo = "acumulado";
     else {
       meses = [];
-      for (let k = 1; k <= m; k++) { const x = S.hist.get(`${anio}-${String(k).padStart(2, "0")}`); if (!x || (x.tipo !== "mensual" && k > 1)) { meses = null; break; } meses.push(x); }
+      for (let k = 1; k <= m; k++) { const x = H.get(`${anio}-${String(k).padStart(2, "0")}`); if (!x || (x.tipo !== "mensual" && k > 1)) { meses = null; break; } meses.push(x); }
       modo = meses ? "mensual" : "saldos";
     }
     const val = (cod) => {
@@ -9138,7 +9151,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (Q.desc.length) html += `<section class="panel"><h2>Comprobantes descuadrados</h2><p class="sub">La suma de sus débitos no es igual a la de sus créditos. Revíselos en MantisWeb.</p>
       <div class="tabla-env"><table class="lista cq"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Tipo</th><th class="num">Débitos</th><th class="num">Créditos</th><th class="num">Diferencia</th></tr></thead><tbody>
       ${Q.desc.slice(0, 200).map((c) => `<tr><td>${esc(fechaC(c.fecha))}</td><td>${compBtn(c.tipo, c.comp)}</td><td><small>${esc(D.tipos[c.tipo] || "")}</small></td>${tdN(c.d)}${tdN(c.c)}<td class="num neg">${cqN(c.d - c.c)}</td></tr>`).join("")}</tbody></table></div></section>`;
-    if (!B) return html + `<section class="panel"><p class="vacio">No hay balance de ${D.anio} en el histórico para comparar. Cárguelo en <a href="#cargar" data-nav="cargar">Cargar archivos</a> (el balance acumulado o por tercero del año, o los balances mensuales).</p></section>`;
+    if (!B) return html + `<section class="panel"><p class="vacio">No hay balance de ${D.anio} en el histórico para comparar. Cárguelo en <a href="#cargar" data-nav="cargar">Cargar archivos</a> (balances mensuales o acumulados) o, si es un año cerrado, en <a href="#anual" data-nav="anual:cargar">Años cerrados</a>.</p></section>`;
     const parcial = Q.corte < D.hasta;
     html += `<section class="panel"><div class="fila" style="justify-content:space-between"><div><h2>Cuenta por cuenta</h2>
       <p class="sub" style="margin:0">Libro auxiliar ${parcial ? `hasta el ${esc(fechaC(Q.corte))} (último balance cargado de ${D.anio})` : `del ${esc(fechaC(D.desde))} al ${esc(fechaC(Q.corte))}`} contra el balance de ${esc(mesNombre(B.per))} ${B.per.slice(0, 4)}. ${Q.conCierre ? "El balance incluye el cierre de año, así que el cierre también se suma del libro." : "Sin el comprobante de cierre de año."}</p></div>
@@ -9255,6 +9268,623 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     return true;
   }
 
+  /* ------------------------------------------------------------ años cerrados (balance por tercero anual)
+     Los años que no están mensualizados (balance por tercero del 1 de enero al 31 de diciembre) van aparte del
+     histórico mensual: colección anuales/{año} con el balance por cuenta, y anualesPartes con el detalle por
+     tercero de todas las cuentas (comprimido), que se descarga solo al consultarlo. */
+  const AN = {
+    vista: "cargar", anio: null, docs: new Map(), det: new Map(), cargas: new Map(), pend: [], error: "", ocupado: "", confirmar: null,
+    f: { cuentas: "", tercero: "", ver: "tercero", orden: "valor" }, limite: 300, h: null, cacheD: null,
+  };
+  S.an = AN;
+  const r2a = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  const nrmA = (s) => String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const txtA = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+  /** Dígito de verificación DIAN de un NIT o número de identificación. */
+  function dvNit(nit) {
+    const s = String(nit || "").replace(/\D/g, "");
+    if (!s || s.length > 15) return "";
+    const P = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
+    let t = 0;
+    for (let i = 0; i < s.length; i++) t += Number(s[s.length - 1 - i]) * P[i];
+    const r = t % 11;
+    return String(r > 1 ? 11 - r : r);
+  }
+  function esAnualNit(filas) {
+    try { const b = Motor.interpretar(filas, ""); return b.desde.slice(5) === "01-01" && b.hasta.slice(5) === "12-31" && b.desde.slice(0, 4) === b.hasta.slice(0, 4); } catch { return false; }
+  }
+  function detalleAnual(filas) {
+    const ie = Motor.filaEncTerceros(filas);
+    const enc = filas[ie].map(nrmA), col = (n) => enc.indexOf(n);
+    const P = { cuenta: col("cuenta"), nit: col("nit"), nom: col("nombre nit"), sa: col("saldo anterior"), d: col("debito"), c: col("credito"), ns: col("nuevo saldo"), dir: col("direccion"), tel: col("telefono"), email: col("email"), ciudad: col("ciudad") };
+    const num = (v) => (typeof v === "number" ? v : Number(String(v ?? "").replace(/\s/g, "").replace(/,/g, "")) || 0);
+    const g = (f, k) => (P[k] >= 0 ? txtA(f[P[k]]) : "");
+    const rows = [], dir = {};
+    for (const f of filas.slice(ie + 1)) {
+      if (!f) continue;
+      const cuenta = typeof f[P.cuenta] === "number" ? String(f[P.cuenta]) : txtA(f[P.cuenta]);
+      if (!/^\d+$/.test(cuenta)) continue;
+      const nit = g(f, "nit").replace(/-\d$/, "");
+      if (!nit) continue;
+      rows.push([cuenta, nit, r2a(num(f[P.sa])), r2a(num(f[P.d])), r2a(num(f[P.c])), r2a(num(f[P.ns]))]);
+      const x = dir[nit] || (dir[nit] = ["", "", "", "", ""]);
+      [g(f, "nom"), g(f, "dir"), g(f, "tel").replace(/^-/, ""), g(f, "email"), g(f, "ciudad")].forEach((v, i) => { if (!x[i] && v) x[i] = v.replace(/\t/g, " "); });
+    }
+    return { rows, dir };
+  }
+  function prepararAnual(filas, archivo) {
+    const b = Motor.interpretar(filas, archivo);
+    const anio = Number(b.hasta.slice(0, 4));
+    const det = detalleAnual(filas);
+    const V = Motor.validar(b, [], S.cfg.mapeo, { tolRedondeo: S.cfg.tolRedondeo });
+    AN.pend = AN.pend.filter((p) => p.anio !== anio).concat([{ anio, b, det, V, archivo }]).sort((x, y) => x.anio - y.anio);
+    AN.vista = "cargar"; AN.anio = anio; AN.error = "";
+    S.tab = "anual"; try { history.replaceState(null, "", "#anual"); } catch { /* */ }
+    render();
+  }
+  async function leerArchivosAnual(files) {
+    AN.error = "";
+    for (const file of files) {
+      try {
+        AN.ocupado = `Leyendo ${file.name}…`; render();
+        await asegurarLibreria("XLSX", ["https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js", "https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"]);
+        if (!window.XLSX) throw new Error("No se pudo cargar el lector de Excel. Recargue la página e intente de nuevo.");
+        const wb = XLSX.read(await file.arrayBuffer(), { type: "array", dense: true });
+        const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null, blankrows: false });
+        if (Motor.filaEncTerceros(filas) < 0) throw new Error("no es un balance por tercero (FunBalanceTotalNit de MantisWeb).");
+        if (!esAnualNit(filas)) throw new Error("debe ir del 1 de enero al 31 de diciembre del mismo año. Los balances mensuales se cargan en Datos → Cargar archivos.");
+        AN.ocupado = "";
+        prepararAnual(filas, file.name);
+      } catch (err) { AN.ocupado = ""; AN.error = `${file.name}: ${err instanceof Motor.ErrorLectura ? err.message : err.message}`; render(); }
+    }
+  }
+  async function guardarAnuales() {
+    const pend = AN.pend.slice();
+    try {
+      for (const P of pend) {
+        const nitCfg = S.cfg.empresa.nit.replace(/\D/g, "").slice(0, 9), nitArch = (P.b.nit || "").replace(/\D/g, "").slice(0, 9);
+        if (nitCfg && nitArch && nitCfg !== nitArch) throw new Error(`El NIT del archivo ${P.archivo} (${P.b.nit}) no coincide con el de la empresa.`);
+        AN.ocupado = `Guardando ${P.anio}…`; render();
+        const cuerpo = JSON.stringify({ dir: P.det.dir }) + "\n" + P.det.rows.map((r) => r.join("\t")).join("\n");
+        const z = await comprimirCQ(cuerpo);
+        const lote = Date.now().toString(36), partes = Math.max(1, Math.ceil(z.datos.length / TAM_PARTE));
+        const anterior = AN.docs.get(P.anio)?.meta;
+        if (S.db) for (let i = 0; i < partes; i++) await S.db.doc(`anualesPartes/${P.anio}_${lote}_${i}`).set({ anio: P.anio, lote, i, d: z.datos.slice(i * TAM_PARTE, (i + 1) * TAM_PARTE) });
+        const meta = { anio: P.anio, archivo: P.archivo, cargado: new Date().toISOString(), balance: Motor.aDocumento(P.b), det: { lote, partes, comp: z.comp, n: P.det.rows.length, nTer: Object.keys(P.det.dir).length } };
+        if (S.db) {
+          await S.db.doc(`anuales/${P.anio}`).set(meta);
+          if (anterior?.det?.lote && anterior.det.lote !== lote) for (let i = 0; i < anterior.det.partes; i++) { try { await S.db.doc(`anualesPartes/${P.anio}_${anterior.det.lote}_${i}`).delete(); } catch { /* */ } }
+        }
+        AN.docs.set(P.anio, { meta, b: P.b });
+        AN.det.set(P.anio, { lote, rows: P.det.rows, dir: P.det.dir });
+        AN.pend = AN.pend.filter((x) => x !== P);
+      }
+      AN.cacheD = null; AN.ocupado = ""; AN.confirmar = null;
+      AN.anio = pend.at(-1)?.anio || AN.anio; AN.vista = "esf";
+      toast(pend.length === 1 ? `Año ${pend[0].anio} guardado en Años cerrados.` : `${pend.length} años guardados en Años cerrados.`);
+    } catch (err) { console.error(err); AN.ocupado = ""; AN.error = `No se pudo guardar: ${err.message || err.code}`; }
+    render();
+  }
+  async function borrarAnual(anio) {
+    const x = AN.docs.get(anio); if (!x) return;
+    try {
+      if (S.db) {
+        await S.db.doc(`anuales/${anio}`).delete();
+        const d = x.meta.det || {};
+        for (let i = 0; i < (d.partes || 0); i++) { try { await S.db.doc(`anualesPartes/${anio}_${d.lote}_${i}`).delete(); } catch { /* */ } }
+      }
+      AN.docs.delete(anio); AN.det.delete(anio); AN.cacheD = null; AN.confirmar = null;
+      toast(`Año ${anio} eliminado de Años cerrados.`);
+    } catch (err) { toast(`No se pudo eliminar: ${err.message || err.code}`); }
+    render();
+  }
+  function detAnual(anio) {
+    const x = AN.docs.get(anio); if (!x) return null;
+    const m = x.meta.det || {};
+    const d = AN.det.get(anio);
+    if (d && d.lote === m.lote) return d;
+    const k = `${anio}_${m.lote}`;
+    if (!AN.cargas.has(k)) {
+      const p = (async () => {
+        if (!S.db) throw new Error("El detalle no está disponible en esta vista. Vuelva a cargar el archivo.");
+        const snaps = await Promise.all([...Array(m.partes).keys()].map((i) => S.db.doc(`anualesPartes/${anio}_${m.lote}_${i}`).get()));
+        if (snaps.some((s) => !s.exists)) throw new Error(`Falta el detalle por tercero de ${anio} en la base de datos. Vuelva a cargar el archivo.`);
+        const cuerpo = await descomprimirCQ(m.comp, snaps.map((s) => s.data().d).join(""));
+        const i = cuerpo.indexOf("\n");
+        const dir = JSON.parse(cuerpo.slice(0, i)).dir || {};
+        const rows = cuerpo.slice(i + 1).split("\n").filter(Boolean).map((l) => { const z = l.split("\t"); return [z[0], z[1], +z[2] || 0, +z[3] || 0, +z[4] || 0, +z[5] || 0]; });
+        AN.det.set(anio, { lote: m.lote, rows, dir });
+      })();
+      AN.cargas.set(k, p);
+      p.catch((err) => { AN.error = err.message; }).finally(() => { AN.cargas.delete(k); if (S.tab === "anual") render(); });
+    }
+    return null;
+  }
+
+  /* ---------- estados del año cerrado */
+  const aniosAN = () => [...AN.docs.keys()].sort((a, b) => b - a);
+  function anioAN() {
+    const as = aniosAN();
+    if (!as.includes(AN.anio)) AN.anio = as[0] || null;
+    return AN.anio;
+  }
+  function calcularAnual(anio) {
+    const clave = `${anio}|${[...AN.docs.values()].map((x) => x.meta.cargado).join(",")}|${S.cfg.version}|${JSON.stringify(S.cfg.mapeo).length}`;
+    if (AN.cacheD && AN.cacheD.clave === clave) return AN.cacheD.D;
+    const H = new Map([...AN.docs].map(([a, x]) => [`${a}-12`, x.b]));
+    const per = `${anio}-12`;
+    if (!H.has(per)) return null;
+    const ctx = Motor.contexto(H, per, S.cfg);
+    const E = Motor.esf(ctx), R = Motor.eri(ctx);
+    const V = Motor.validar(ctx.b, [...H.keys()].filter((p) => p !== per), S.cfg.mapeo, { tolRedondeo: S.cfg.tolRedondeo });
+    const f1399 = ctx.b.filas.get("1399");
+    const D = { ctx, E, R, V, alerta1399: f1399 && f1399.ns > 1 ? f1399.ns : 0, anual: true };
+    AN.cacheD = { clave, D };
+    return D;
+  }
+  /** Firmantes, notas y portada toman el corte de S.periodo: mientras se arma el año cerrado se usa diciembre de ese año. */
+  function conPeriodo(per, fn) { const prev = S.periodo; S.periodo = per; try { return fn(); } finally { S.periodo = prev; } }
+
+  function cabeceraAN(titulo, sub, botones = "") {
+    const as = aniosAN(), Y = anioAN();
+    return `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start">
+      <div><h2>${esc(titulo)}</h2><p class="sub" style="margin:0">${sub}</p></div>
+      <div class="fila"><label for="an-anio" class="pie" style="margin:0">Año</label><select id="an-anio">${as.map((a) => `<option value="${a}" ${a === Y ? "selected" : ""}>${a}</option>`).join("")}</select>${botones}</div></div></section>`;
+  }
+  function vistaAnual() {
+    let html = "";
+    if (AN.ocupado) html += `<div class="aviso info"><p><span class="girando" aria-hidden="true"></span>${esc(AN.ocupado)}</p></div>`;
+    if (AN.error) html += `<div class="aviso error"><p>${esc(AN.error)}</p></div>`;
+    if (AN.vista === "cargar" || !aniosAN().length) return html + anCargar();
+    const Y = anioAN();
+    if (AN.vista === "terceros") return html + anTerceros(Y);
+    const D = calcularAnual(Y);
+    if (!D) return html + anCargar();
+    const titulos = { esf: "Situación financiera", eri: "Resultados integrales", ecp: "Cambios en el patrimonio", efe: "Flujos de efectivo", ind: "Indicadores financieros", notas: "Notas a los estados financieros" };
+    const comp = AN.docs.has(Y - 1) ? `comparado con ${Y - 1}` : `sin ${Y - 1} cargado: el estado de resultados sale sin comparativo`;
+    html += cabeceraAN(`${titulos[AN.vista] || ""} · año ${Y}`, `Año cerrado del 1 de enero al 31 de diciembre de ${Y}, ${comp}. No se mezcla con el histórico mensual.`,
+      `<button class="btn" data-an="pdf">PDF (paquete)</button><button class="btn" data-an="excel">Excel</button>`);
+    return html + conPeriodo(`${Y}-12`, () => {
+      if (AN.vista === "eri") return modeloHTML(modeloERI(D));
+      if (AN.vista === "ecp") return modeloHTML(modeloECP(D));
+      if (AN.vista === "efe") return modeloHTML(modeloEFE(D));
+      if (AN.vista === "ind") return modeloHTML(modeloInd(D));
+      if (AN.vista === "notas") return vistaNotas(D);
+      return modeloHTML(modeloESF(D));
+    });
+  }
+  function anCargar() {
+    let html = `<section class="panel"><h2>Años cerrados</h2>
+      <p class="sub">Para los años que no están mensualizados (2023 y 2024): cargue el <b>balance por tercero</b> de MantisWeb (FunBalanceTotalNit, Libro de Inventario por Nit) del 1 de enero al 31 de diciembre. Se guarda aparte del histórico mensual, con sus estados financieros y el detalle por tercero de todas las cuentas para requerimientos de la DIAN.</p>
+      <div class="zona" id="zona-an" tabindex="0" role="button" aria-label="Cargar balance anual por tercero"><b>Arrastre aquí el balance anual por tercero o haga clic para buscarlo</b><span>FunBalanceTotalNit….xls · puede soltar varios años juntos</span></div></section>`;
+    for (const P of AN.pend) {
+      const existe = AN.docs.get(P.anio);
+      html += `<section class="panel"><h2>${esc(P.archivo)} · año ${P.anio}</h2>
+        <p class="sub">Del ${esc(fechaLarga(P.b.desde))} al ${esc(fechaLarga(P.b.hasta))} · ${fmt(P.b.filas.size)} cuentas · ${fmt(P.det.rows.length)} saldos por tercero de ${fmt(Object.keys(P.det.dir).length)} terceros · resultado del año ${fmt(Motor.resultado(P.b))}</p>
+        <div class="fila" style="margin:10px 0">${resumenControles(P.V)}</div>
+        ${existe ? `<div class="aviso advertencia"><p>Ya hay un balance de ${P.anio} en Años cerrados (${esc(existe.meta.archivo)}). Al guardar se reemplaza.</p></div>` : ""}
+        <details><summary style="cursor:pointer;font-weight:600">Ver los ${P.V.length} controles</summary><div style="margin-top:10px">${controlesHTML(P.V)}</div></details></section>`;
+    }
+    if (AN.pend.length) html += `<section class="panel"><div class="fila"><button class="btn primario" data-an="guardar">${AN.pend.length === 1 ? `Guardar ${AN.pend[0].anio}` : `Guardar los ${AN.pend.length} años`} en Años cerrados</button><button class="btn" data-an="descartar">Descartar</button></div></section>`;
+    const as = aniosAN();
+    html += `<section class="panel"><h2>Guardados</h2>${as.length ? `<div class="tabla-env"><table class="lista"><thead><tr><th>Año</th><th>Archivo</th><th class="num">Cuentas</th><th class="num">Saldos por tercero</th><th class="num">Resultado</th><th>Cargado</th><th></th></tr></thead><tbody>
+      ${as.map((a) => { const x = AN.docs.get(a); return `<tr><td><b>${a}</b></td><td><small>${esc(x.meta.archivo)}</small></td><td class="num">${fmt(x.b.filas.size)}</td><td class="num">${fmt(x.meta.det?.n || 0)}<small>${fmt(x.meta.det?.nTer || 0)} terceros</small></td><td class="num">${fmt(Motor.resultado(x.b))}</td>
+        <td>${x.meta.cargado ? esc(new Date(x.meta.cargado).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })) : "—"}</td>
+        <td class="num">${AN.confirmar === a ? `<button class="btn chico peligro" data-an="borrar" data-anio="${a}">Eliminar</button> <button class="btn chico" data-an="cancelar">No</button>` : `<button class="btn chico" data-an="ir" data-v="esf" data-anio="${a}">Estados</button> <button class="btn chico" data-an="ir" data-v="terceros" data-anio="${a}">Terceros</button> <button class="btn chico" data-an="pedir-borrar" data-anio="${a}">Eliminar</button>`}</td></tr>`; }).join("")}
+      </tbody></table></div>` : `<p class="vacio">Todavía no hay años cerrados cargados.</p>`}</section>`;
+    return html;
+  }
+
+  /* ---------- saldos por tercero (requerimientos DIAN) */
+  const PRESETS_AN = [["", "Todas las cuentas"], ["4", "Ingresos (4)"], ["5,6", "Costos y gastos (5 y 6)"], ["13", "Cuentas por cobrar (13)"], ["22,23", "Proveedores y cuentas por pagar (22, 23)"], ["2365,2367,2368", "Retenciones (2365, 2367, 2368)"], ["2408", "IVA (2408)"], ["1", "Activo (1)"], ["2", "Pasivo (2)"]];
+  function datosTerAN(anio) {
+    const d = detAnual(anio);
+    if (!d) return null;
+    const b = AN.docs.get(anio).b, f = AN.f;
+    const prefs = f.cuentas.split(/[,;\s]+/).map((x) => x.trim()).filter((x) => /^\d+$/.test(x));
+    const qt = f.tercero.trim(), qn = /^\d[\d.\-\s]*$/.test(qt) ? qt.replace(/\D/g, "") : "", qx = qn ? "" : nrmA(qt);
+    const filas = d.rows.filter((r) => (!prefs.length || prefs.some((p) => r[0].startsWith(p)))
+      && (!qn || r[1].startsWith(qn)) && (!qx || nrmA(d.dir[r[1]]?.[0]).includes(qx))
+      && (Math.abs(r[2]) >= 0.005 || Math.abs(r[3]) >= 0.005 || Math.abs(r[4]) >= 0.005 || Math.abs(r[5]) >= 0.005));
+    let grupos;
+    if (f.ver === "tercero") {
+      const M = new Map();
+      for (const r of filas) { const x = M.get(r[1]) || { nit: r[1], cuentas: new Set(), sa: 0, d: 0, c: 0, ns: 0 }; x.cuentas.add(r[0]); x.sa += r[2]; x.d += r[3]; x.c += r[4]; x.ns += r[5]; M.set(r[1], x); }
+      grupos = [...M.values()];
+    } else grupos = filas.map((r) => ({ nit: r[1], cuenta: r[0], sa: r[2], d: r[3], c: r[4], ns: r[5] }));
+    const nom = (n) => d.dir[n]?.[0] || "";
+    if (f.orden === "nit") grupos.sort((a, b2) => a.nit.localeCompare(b2.nit, "es", { numeric: true }) || (a.cuenta || "").localeCompare(b2.cuenta || ""));
+    else if (f.orden === "nombre") grupos.sort((a, b2) => nom(a.nit).localeCompare(nom(b2.nit)) || (a.cuenta || "").localeCompare(b2.cuenta || ""));
+    else grupos.sort((a, b2) => Math.max(Math.abs(b2.ns), Math.abs(b2.d - b2.c)) - Math.max(Math.abs(a.ns), Math.abs(a.d - a.c)));
+    // Control: por cada cuenta con valor propio, la suma de sus terceros debe dar su total.
+    const hijos = new Map();
+    for (const cod of b.codigos) { const p = b.filas.get(cod).padre; if (p) { if (!hijos.has(p)) hijos.set(p, []); hijos.get(p).push(cod); } }
+    const propio = (cod, k) => { let v = b.filas.get(cod)[k]; for (const h of hijos.get(cod) || []) v -= b.filas.get(h)[k]; return v; };
+    const sumT = new Map();
+    for (const r of d.rows) { const x = sumT.get(r[0]) || [0, 0, 0, 0]; x[0] += r[2]; x[1] += r[3]; x[2] += r[4]; x[3] += r[5]; sumT.set(r[0], x); }
+    const control = [];
+    for (const cod of b.codigos) {
+      if (prefs.length && !prefs.some((p) => cod.startsWith(p))) continue;
+      const own = ["sa", "d", "c", "ns"].map((k) => propio(cod, k));
+      if (own.every((v) => Math.abs(v) < 0.5)) continue;
+      const t = sumT.get(cod) || [0, 0, 0, 0];
+      const dif = own.map((v, i) => v - t[i]);
+      if (dif.some((v) => Math.abs(v) > 1)) control.push({ cod, nombre: b.filas.get(cod).nombre, own, t, dif, sinDetalle: !sumT.has(cod) });
+    }
+    const tot = grupos.reduce((s, x) => { s.sa += x.sa; s.d += x.d; s.c += x.c; s.ns += x.ns; return s; }, { sa: 0, d: 0, c: 0, ns: 0 });
+    return { d, b, grupos, tot, control, prefs, nom };
+  }
+  function anTerceros(Y) {
+    const f = AN.f;
+    let html = cabeceraAN(`Saldos por tercero · año ${Y}`, "Saldo inicial, débitos, créditos y saldo final de cada tercero, para cualquier cuenta. Sirve para requerimientos de información de la DIAN.", `<button class="btn" data-an="excel-ter">Excel</button>`);
+    html += `<section class="panel"><div class="fila" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">${PRESETS_AN.map(([v, t]) => `<button class="btn chico" data-an="preset" data-v="${v}" aria-pressed="${f.cuentas === v}">${esc(t)}</button>`).join("")}</div>
+      <div class="cq-filtros">
+        <label>Cuentas<input type="text" id="an-f-cuentas" data-anf="cuentas" value="${esc(f.cuentas)}" placeholder="Prefijos separados por coma: 4135, 2365" autocomplete="off"></label>
+        <label>Tercero<input type="text" id="an-f-tercero" data-anf="tercero" value="${esc(f.tercero)}" placeholder="NIT o nombre" autocomplete="off"></label>
+        <label>Ver<select data-anf="ver"><option value="tercero" ${f.ver === "tercero" ? "selected" : ""}>Un renglón por tercero (suma de las cuentas)</option><option value="cuenta" ${f.ver === "cuenta" ? "selected" : ""}>Por cuenta y tercero</option></select></label>
+        <label>Orden<select data-anf="orden"><option value="valor" ${f.orden === "valor" ? "selected" : ""}>Mayor valor primero</option><option value="nit" ${f.orden === "nit" ? "selected" : ""}>NIT</option><option value="nombre" ${f.orden === "nombre" ? "selected" : ""}>Nombre</option></select></label>
+      </div></section>`;
+    const X = datosTerAN(Y);
+    if (!X) return html + `<section class="panel"><p class="vacio"><span class="girando" aria-hidden="true"></span>Descargando el detalle por tercero de ${Y}…</p></section>`;
+    const { grupos, tot, control, nom, d, b } = X;
+    const porCuenta = f.ver === "cuenta";
+    html += `<div class="kpis"><div class="kpi"><span>${porCuenta ? "Renglones" : "Terceros"}</span><b>${fmt(grupos.length)}</b><small>${X.prefs.length ? `cuentas ${esc(X.prefs.join(", "))}` : "todas las cuentas"}</small></div>
+      <div class="kpi"><span>Saldo inicial</span><b>${cqS(tot.sa)}</b></div><div class="kpi"><span>Débitos</span><b>${cqS(tot.d)}</b></div><div class="kpi"><span>Créditos</span><b>${cqS(tot.c)}</b></div><div class="kpi"><span>Saldo final</span><b>${cqS(tot.ns)}</b></div></div>`;
+    if (control.length) html += `<section class="panel"><h2>Cuentas cuyo detalle por tercero no da el total</h2><p class="sub">El valor está en la cuenta sin tercero, o la suma de terceros no coincide con el total de la cuenta. Téngalo en cuenta al responder: esos valores no salen en la lista por tercero.</p>
+      <div class="tabla-env"><table class="lista cq"><thead><tr><th>Cuenta</th><th class="num">Saldo final de la cuenta</th><th class="num">Suma de terceros</th><th class="num">Diferencia saldo</th><th class="num">Diferencia débitos</th><th class="num">Diferencia créditos</th></tr></thead><tbody>
+      ${control.map((c) => `<tr><td>${esc(c.cod)}<small>${esc(c.nombre)}${c.sinDetalle ? " · sin detalle por tercero" : ""}</small></td><td class="num">${cqS(c.own[3])}</td><td class="num">${cqS(c.t[3])}</td>${tdDif(c.dif[3])}${tdDif(c.dif[1])}${tdDif(c.dif[2])}</tr>`).join("")}</tbody></table></div></section>`;
+    if (!grupos.length) return html + `<section class="panel"><p class="vacio">Ningún tercero coincide con la búsqueda.</p></section>`;
+    html += `<section class="panel"><div class="tabla-env"><table class="lista cq"><thead><tr><th>NIT</th><th>Tercero</th>${porCuenta ? "<th>Cuenta</th>" : ""}<th>Ciudad</th><th class="num">Saldo inicial</th><th class="num">Débitos</th><th class="num">Créditos</th><th class="num">Saldo final</th></tr></thead><tbody>
+      ${grupos.slice(0, AN.limite).map((x) => { const dd = d.dir[x.nit] || []; return `<tr><td class="cq-fec">${esc(x.nit)}${dvNit(x.nit) ? `-${dvNit(x.nit)}` : ""}</td><td class="nom">${esc(nom(x.nit) || "—")}${dd[3] || dd[2] ? `<small>${esc([dd[2], dd[3]].filter(Boolean).join(" · "))}</small>` : ""}</td>
+        ${porCuenta ? `<td>${esc(x.cuenta)}<small>${esc(b.filas.get(x.cuenta)?.nombre || "")}</small></td>` : ""}<td><small>${esc(dd[4] || "")}</small></td>
+        <td class="num">${cqS(x.sa)}</td>${tdN(x.d)}${tdN(x.c)}<td class="num">${cqS(x.ns)}</td></tr>`; }).join("")}
+      <tr class="dn-tot"><td colspan="${porCuenta ? 4 : 3}">Total (${fmt(grupos.length)})</td><td class="num">${cqS(tot.sa)}</td>${tdN(tot.d)}${tdN(tot.c)}<td class="num">${cqS(tot.ns)}</td></tr></tbody></table></div>
+      ${grupos.length > AN.limite ? `<div class="fila" style="justify-content:center;margin-top:10px"><span class="pie" style="margin:0">Se muestran ${fmt(AN.limite)} de ${fmt(grupos.length)}.</span><button class="btn chico" data-an="mas">Ver más</button><button class="btn chico" data-an="todos">Ver todos</button></div>` : ""}
+      <p class="pie">Saldos con el signo del balance: débito positivo, crédito negativo. El NIT lleva el dígito de verificación calculado. El Excel trae además dirección, teléfono y correo de cada tercero.</p></section>`;
+    return html;
+  }
+
+  /* ---------- exportación */
+  async function exportarAnual(tipo) {
+    const Y = anioAN(); if (!Y) return;
+    const per = `${Y}-12`;
+    let data, nombre;
+    try {
+      if (tipo === "excel-ter") {
+        const X = datosTerAN(Y); if (!X) return;
+        await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
+        if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
+        const porCuenta = AN.f.ver === "cuenta", e = S.cfg.empresa;
+        const aoa = [[e.razon], [`NIT ${e.nit}`], [`Saldos por tercero del 1 de enero al 31 de diciembre de ${Y}`], [X.prefs.length ? `Cuentas: ${X.prefs.join(", ")}` : "Todas las cuentas"], [],
+          ["NIT", "DV", "Nombre o razón social", "Dirección", "Teléfono", "Correo", "Ciudad", ...(porCuenta ? ["Cuenta", "Nombre de la cuenta"] : ["Cuentas"]), "Saldo inicial", "Débitos", "Créditos", "Saldo final", "Débitos - créditos"],
+          ...X.grupos.map((x) => { const dd = X.d.dir[x.nit] || []; return [x.nit, dvNit(x.nit), dd[0] || "", dd[1] || "", dd[2] || "", dd[3] || "", dd[4] || "", ...(porCuenta ? [x.cuenta, X.b.filas.get(x.cuenta)?.nombre || ""] : [[...x.cuentas].sort().join(", ")]), r2a(x.sa), r2a(x.d), r2a(x.c), r2a(x.ns), r2a(x.d - x.c)]; }),
+          ["Total", "", "", "", "", "", "", ...(porCuenta ? ["", ""] : [""]), r2a(X.tot.sa), r2a(X.tot.d), r2a(X.tot.c), r2a(X.tot.ns), r2a(X.tot.d - X.tot.c)]];
+        const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws["!cols"] = [13, 4, 40, 30, 13, 28, 14, ...(porCuenta ? [11, 30] : [24]), 16, 16, 16, 16, 16].map((w) => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, ws, "Terceros");
+        if (X.control.length) {
+          const wc = XLSX.utils.aoa_to_sheet([["Cuentas cuyo detalle por tercero no da el total"], [], ["Cuenta", "Nombre", "Saldo final cuenta", "Suma terceros", "Diferencia saldo final", "Diferencia débitos", "Diferencia créditos"], ...X.control.map((c) => [c.cod, c.nombre, r2a(c.own[3]), r2a(c.t[3]), r2a(c.dif[3]), r2a(c.dif[1]), r2a(c.dif[2])])]);
+          wc["!cols"] = [11, 36, 16, 16, 16, 16, 16].map((w) => ({ wch: w }));
+          XLSX.utils.book_append_sheet(wb, wc, "Control");
+        }
+        data = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+        nombre = `Terceros_${Y}${X.prefs.length ? "_" + X.prefs.join("-") : ""}.xlsx`;
+      } else {
+        const D = calcularAnual(Y); if (!D) return;
+        if (tipo === "excel") {
+          await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
+          if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
+          data = conPeriodo(per, () => construirExcel(D, [modeloESF(D), modeloERI(D), modeloECP(D), modeloEFE(D), modeloInd(D)]));
+          nombre = `EEFF_Districlinicas_${Y}.xlsx`;
+        } else {
+          await asegurarLibreria("jspdf", ["https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", "https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"]);
+          if (window.jspdf && !window.jspdf.jsPDF.API.autoTable) await new Promise((ok) => { const sc = document.createElement("script"); sc.src = "https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"; sc.onload = ok; sc.onerror = ok; document.head.appendChild(sc); });
+          if (!window.jspdf) throw new Error("No se pudo cargar la librería de PDF.");
+          data = conPeriodo(per, () => construirPDF(["esf", "eri", "ecp", "efe", "ind", "notas"], D));
+          nombre = `EEFF_Districlinicas_${Y}.pdf`;
+        }
+      }
+    } catch (err) { console.error(err); toast(`No se pudo generar el archivo: ${err.message}`); return; }
+    return guardarArchivo(nombre, data);
+  }
+
+  /* ---------- eventos */
+  function clicAnual(t) {
+    if (t.id === "zona-an") { $("#archivo-an").click(); return true; }
+    const a = t.dataset.an; if (!a) return false;
+    if (a === "guardar") guardarAnuales();
+    else if (a === "descartar") { AN.pend = []; render(); }
+    else if (a === "pedir-borrar") { AN.confirmar = Number(t.dataset.anio); render(); }
+    else if (a === "cancelar") { AN.confirmar = null; render(); }
+    else if (a === "borrar") borrarAnual(Number(t.dataset.anio));
+    else if (a === "ir") { AN.anio = Number(t.dataset.anio); AN.vista = t.dataset.v; AN.limite = 300; render(); window.scrollTo(0, 0); }
+    else if (a === "preset") { AN.f.cuentas = t.dataset.v; AN.limite = 300; render(); }
+    else if (a === "mas") { AN.limite += 300; const y = window.scrollY; render(); window.scrollTo(0, y); }
+    else if (a === "todos") { AN.limite = 1e7; const y = window.scrollY; render(); window.scrollTo(0, y); }
+    else if (a === "pdf") exportarAnual("pdf");
+    else if (a === "excel") exportarAnual("excel");
+    else if (a === "excel-ter") exportarAnual("excel-ter");
+    return true;
+  }
+  function cambioAnual(el) {
+    if (el.id === "archivo-an") { if (el.files.length) leerArchivosAnual([...el.files]); el.value = ""; return true; }
+    if (el.id === "an-anio") { AN.anio = Number(el.value); AN.limite = 300; render(); return true; }
+    const k = el.dataset.anf; if (!k) return false;
+    if (el.type === "text") return true;
+    AN.f[k] = el.value; AN.limite = 300; render();
+    return true;
+  }
+  function entradaAnual(el) {
+    const k = el.dataset.anf; if (!k || el.type !== "text") return false;
+    AN.f[k] = el.value; AN.limite = 300;
+    const id = el.id;
+    clearTimeout(AN.h);
+    AN.h = setTimeout(() => {
+      const ae = document.activeElement, pos = ae && ae.id === id ? ae.selectionStart : null;
+      render();
+      const f = $("#" + id);
+      if (f && pos != null) { f.focus(); try { f.setSelectionRange(pos, pos); } catch { /* */ } }
+    }, 300);
+    return true;
+  }
+
+  /* ------------------------------------------------------------ declaraciones de renta presentadas (formulario 110)
+     Se guardan los renglones leídos del PDF (colección renta) y el PDF original (rentaPdf), por año y número de
+     formulario. La última presentada de cada año (por fecha) es la vigente. */
+  const RT = { docs: new Map(), error: "", ocupado: "", confirmar: null, anioCruce: null, verTodos: false };
+  S.rt = RT;
+  const R110 = {
+    33: "Total costos y gastos de nómina", 34: "Aportes al sistema de seguridad social", 35: "Aportes al SENA, ICBF, cajas de compensación",
+    36: "Efectivo y equivalentes al efectivo", 37: "Inversiones e instrumentos financieros derivados", 38: "Cuentas, documentos y arrendamientos financieros por cobrar",
+    39: "Inventarios", 40: "Activos intangibles", 41: "Activos biológicos", 42: "Propiedades, planta y equipo, propiedades de inversión y ANCMV", 43: "Otros activos",
+    44: "Total patrimonio bruto", 45: "Pasivos", 46: "Total patrimonio líquido",
+    47: "Ingresos brutos de actividades ordinarias", 48: "Ingresos financieros", 49: "Dividendos y participaciones (renglón 49)", 50: "Dividendos y participaciones (renglón 50)",
+    51: "Dividendos y participaciones (renglón 51)", 52: "Dividendos y participaciones (renglón 52)", 53: "Dividendos y participaciones (renglón 53)", 54: "Dividendos y participaciones (renglón 54)",
+    55: "Dividendos y participaciones (renglón 55)", 56: "Dividendos y participaciones (renglón 56)", 57: "Otros ingresos", 58: "Total ingresos brutos",
+    59: "Devoluciones, rebajas y descuentos en ventas", 60: "Ingresos no constitutivos de renta ni ganancia ocasional", 61: "Ingresos netos",
+    62: "Costos", 63: "Gastos de administración", 64: "Gastos de distribución y ventas", 65: "Gastos financieros", 66: "Otros gastos y deducciones", 67: "Total costos y gastos deducibles",
+    68: "Inversiones efectuadas en el año", 69: "Inversiones liquidadas de períodos gravables anteriores", 70: "Renta por recuperación de deducciones",
+    71: "Renta pasiva – ECE sin residencia fiscal en Colombia", 72: "Renta líquida ordinaria del ejercicio", 73: "Pérdida líquida del ejercicio", 74: "Compensaciones",
+    75: "Renta líquida", 76: "Renta presuntiva", 77: "Renta exenta", 78: "Rentas gravables", 79: "Renta líquida gravable",
+    80: "Ingresos por ganancias ocasionales", 81: "Costos por ganancias ocasionales", 82: "Ganancias ocasionales no gravadas y exentas", 83: "Ganancias ocasionales gravables",
+    84: "Impuesto sobre la renta líquida gravable", 85: "Impuesto sobre rentas líquidas (renglón 85)", 86: "Impuesto sobre rentas líquidas (renglón 86)", 87: "Impuesto sobre rentas líquidas (renglón 87)",
+    88: "Impuesto sobre rentas líquidas (renglón 88)", 89: "Impuesto sobre rentas líquidas (renglón 89)", 90: "Impuesto sobre rentas líquidas (renglón 90)",
+    91: "Total impuesto sobre las rentas líquidas gravables", 92: "Valor a adicionar (VAA)", 93: "Descuentos tributarios", 94: "Impuesto neto de renta (sin impuesto adicionado)",
+    95: "Impuesto a adicionar (IA)", 96: "Impuesto neto de renta (con impuesto adicionado)", 97: "Impuesto de ganancias ocasionales", 98: "Descuento por impuestos pagados en el exterior por ganancias ocasionales",
+    99: "Total impuesto a cargo", 100: "Valor inversión obras por impuestos (modalidad de pago 1)", 101: "Descuento efectivo inversión obras por impuestos (modalidad de pago 2)",
+    102: "Crédito fiscal artículo 256-1 E.T.", 103: "Anticipo renta liquidado año gravable anterior", 104: "Saldo a favor año gravable anterior sin solicitud de devolución o compensación",
+    105: "Autorretenciones", 106: "Otras retenciones", 107: "Total retenciones año gravable", 108: "Anticipo renta para el año gravable siguiente",
+    109: "Anticipo puntos adicionales año gravable anterior", 110: "Anticipo puntos adicionales año gravable siguiente", 111: "Saldo a pagar por impuesto", 112: "Sanciones",
+    113: "Total saldo a pagar", 114: "Total saldo a favor", 115: "Renglón 115", 116: "Renglón 116", 117: "Aporte voluntario artículo 244-1 E.T.",
+  };
+  const SEC110 = [[33, "Datos informativos"], [36, "Patrimonio"], [47, "Ingresos"], [62, "Costos y deducciones"], [68, "Renta"], [80, "Ganancias ocasionales"], [84, "Liquidación privada"]];
+  /** Lee el formulario 110 presentado. paginas: [[{str,x,y,w}]] de pdf.js (y crece hacia arriba). Devuelve null si no es un 110. */
+  function leer110(paginas) {
+    const todo = paginas.flat().map((i) => i.str).join(" ");
+    if (!/Total patrimonio l[ií]quido/i.test(todo) || !/Renta l[ií]quida/i.test(todo) || !/Total impuesto a cargo/i.test(todo)) return null;
+    const its = paginas[0].map((i) => ({ t: String(i.str).trim(), x: i.x, y: i.y, x2: i.x + (i.w || 0) })).filter((i) => i.t);
+    const esValor = (t) => /^-?\d{1,3}([.,]\d{3})*$/.test(t);
+    const num = (t) => Number(t.replace(/[.,]/g, ""));
+    const R = {}, usados = new Set();
+    // Datos informativos (33 a 35): el valor va en la misma línea, a la derecha de la etiqueta "33. …".
+    for (const et of its.filter((i) => /^(33|34|35)\.(\s|$)/.test(i.t))) {
+      const n = Number(et.t.slice(0, 2));
+      const v = its.filter((i) => esValor(i.t) && i.x > et.x && Math.abs(i.y - et.y) < 4).sort((a, b) => a.x - b.x)[0];
+      if (v) { R[n] = num(v.t); usados.add(v); }
+    }
+    // Demás renglones: el formulario es una cuadrícula de 12 puntos por renglón en dos columnas. Cada valor se ubica
+    // por el número de renglón impreso más cercano en su columna (algunos números no vienen como texto).
+    const labs = its.filter((i) => /^\d{2,3}$/.test(i.t) && +i.t >= 36 && +i.t <= 117);
+    const bordes = [];
+    for (const v of its) if (/[.,]\d{3}$/.test(v.t) && !usados.has(v) && !bordes.some((b) => Math.abs(b - v.x2) < 4)) bordes.push(v.x2);
+    for (const v of its) {
+      // Los valores van en miles: o es 0 o lleva separador de miles (así no se toman dígitos sueltos de las etiquetas).
+      if (usados.has(v) || !esValor(v.t) || !(v.t === "0" || /[.,]\d{3}$/.test(v.t)) || labs.includes(v) || !bordes.some((b) => Math.abs(b - v.x2) < 4)) continue;
+      const cand = labs.filter((l) => l.x2 < v.x && v.x - l.x2 < 200);
+      if (!cand.length) continue;
+      const colx = Math.max(...cand.map((c) => c.x));
+      const col = cand.filter((l) => Math.abs(l.x - colx) < 8);
+      const l = col.reduce((a, b) => (Math.abs(b.y - v.y) < Math.abs(a.y - v.y) ? b : a));
+      const dy = l.y - v.y, k = Math.round(dy / 12);
+      if (Math.abs(k) > 3 || Math.abs(dy - k * 12) > 4) continue;
+      const rn = +l.t + k;
+      if (rn >= 36 && rn <= 117 && R[rn] == null) R[rn] = num(v.t);
+    }
+    const d = { tipo: "110", R };
+    const et = its.find((i) => /^1\.\s*Año/.test(i.t));
+    if (et) {
+      const tope = its.find((i) => /^29\./.test(i.t))?.x ?? et.x + 200;
+      const dig = its.filter((i) => /^\d$/.test(i.t) && i.x > et.x && i.x < tope && Math.abs(i.y - et.y) < 10).sort((a, b) => a.x - b.x).map((i) => i.t).join("");
+      if (/^\d{4}$/.test(dig)) d.anio = Number(dig);
+    }
+    if (!d.anio) { const m = todo.match(/1\.\s*Año\s+((?:\d\s*){4})/); if (m) d.anio = Number(m[1].replace(/\s/g, "")); }
+    const fm = todo.match(/formulario\s+(\d{13})/i) || todo.match(/\b(\d{13})\b/);
+    d.formulario = fm ? fm[1] : "";
+    const fp = todo.match(/(\d{4}-\d{2}-\d{2}) \/ \d{2}:\d{2}/);
+    d.fecha = fp ? fp[1] : null;
+    d.nit = todo.replace(/\s/g, "").match(/\(NIT\)[^0-9]*(\d{9})/)?.[1] || "";
+    if (!d.anio) throw new Error("Se reconoció el formulario 110, pero no se pudo leer el año gravable.");
+    if (!d.formulario) throw new Error("Se reconoció el formulario 110, pero no se pudo leer el número de formulario.");
+    d.controles = controles110(R);
+    return d;
+  }
+  /** Controles aritméticos del formulario: confirman que la lectura del PDF quedó bien. */
+  function controles110(R) {
+    const g = (k) => R[k] || 0, s = (a, b) => { let t = 0; for (let k = a; k <= b; k++) t += g(k); return t; };
+    return [
+      ["44 = suma de 36 a 43", g(44) - s(36, 43)], ["46 = 44 − 45", g(46) - Math.max(0, g(44) - g(45))], ["58 = suma de 47 a 57", g(58) - s(47, 57)],
+      ["61 = 58 − 59 − 60", g(61) - Math.max(0, g(58) - g(59) - g(60))], ["67 = suma de 62 a 66", g(67) - s(62, 66)],
+      ["99 = 96 + 97 − 98", g(99) - (g(96) + g(97) - g(98))], ["107 = 105 + 106", g(107) - g(105) - g(106)],
+      ["113 − 114 = 99 − 100 − 101 − 102 − 103 − 104 − 107 + 108 − 109 + 110 + 112", (g(113) - g(114)) - (g(99) - g(100) - g(101) - g(102) - g(103) - g(104) - g(107) + g(108) - g(109) + g(110) + g(112))],
+    ].map(([t, dif]) => ({ t, ok: Math.abs(dif) < 1000, dif }));
+  }
+  const rentaVigente = (anio) => [...RT.docs.values()].filter((d) => d.anio === anio).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "") || b.formulario.localeCompare(a.formulario))[0] || null;
+  const aniosRenta = () => [...new Set([...RT.docs.values()].map((d) => d.anio))].sort((a, b) => a - b);
+
+  async function leerArchivosRenta(files) {
+    RT.error = "";
+    const errores = [], hechos = [];
+    try {
+      await asegurarLibreria("pdfjsLib", ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js", "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"]);
+      await asegurarLibreria("pdfjsWorker", ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js", "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"]);
+      if (!window.pdfjsLib) throw new Error("No se pudo cargar el lector de PDF. Recargue la página e intente de nuevo.");
+    } catch (err) { RT.error = err.message; return render(); }
+    for (const file of files) {
+      try {
+        RT.ocupado = `Leyendo ${file.name}…`; render();
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const pdf = await window.pdfjsLib.getDocument({ data: buf.slice(), isEvalSupported: false }).promise;
+        const paginas = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const tc = await (await pdf.getPage(i)).getTextContent();
+          paginas.push(tc.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width })));
+        }
+        const d = leer110(paginas);
+        if (!d) throw new Error("no es un formulario 110 de renta presentado ante la DIAN.");
+        const nitCfg = S.cfg.empresa.nit.replace(/\D/g, "").slice(0, 9);
+        if (nitCfg && d.nit && d.nit !== nitCfg) throw new Error(`el NIT del formulario (${d.nit}) no es el de la empresa.`);
+        const id = `${d.anio}_${d.formulario}`;
+        const doc = { id, anio: d.anio, formulario: d.formulario, fecha: d.fecha, nit: d.nit, archivo: file.name, cargado: new Date().toISOString(),
+          R: Object.fromEntries(Object.entries(d.R).map(([k, v]) => [String(k), v])), controles: d.controles };
+        let bin = "";
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        const b64 = btoa(bin);
+        if (S.db) {
+          if (b64.length < 1000000) await S.db.doc(`rentaPdf/${id}`).set({ id, nombre: file.name, d: b64 });
+          await S.db.doc(`renta/${id}`).set({ ...doc, pdf: b64.length < 1000000 });
+        }
+        RT.docs.set(id, { ...doc, pdf: b64.length < 1000000, _pdf: b64 });
+        const malos = d.controles.filter((c) => !c.ok).length;
+        hechos.push(`${d.anio} (formulario ${d.formulario})${malos ? ` — ${malos} controles no cuadran: revise los valores` : ""}`);
+      } catch (err) { console.error(err); errores.push(`${file.name}: ${err.message || err}`); }
+    }
+    RT.ocupado = "";
+    if (errores.length) RT.error = errores.join(" · ");
+    if (hechos.length) toast(`Declaraciones guardadas: ${hechos.join(", ")}.`);
+    render();
+  }
+  async function descargarPdfRenta(id) {
+    const d = RT.docs.get(id); if (!d) return;
+    try {
+      let b64 = d._pdf;
+      if (!b64 && S.db) { const s = await S.db.doc(`rentaPdf/${id}`).get(); if (s.exists) b64 = s.data().d; }
+      if (!b64) throw new Error("el PDF original no está guardado.");
+      const bin = atob(b64), u = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      await guardarArchivo(d.archivo || `Formulario_110_${d.anio}_${d.formulario}.pdf`, u);
+    } catch (err) { toast(`No se pudo descargar: ${err.message}`); }
+  }
+  async function borrarRenta(id) {
+    try {
+      if (S.db) { await S.db.doc(`renta/${id}`).delete(); try { await S.db.doc(`rentaPdf/${id}`).delete(); } catch { /* */ } }
+      RT.docs.delete(id); RT.confirmar = null; toast("Declaración eliminada.");
+    } catch (err) { toast(`No se pudo eliminar: ${err.message || err.code}`); }
+    render();
+  }
+
+  /** Saldos y movimientos contables del año para cruzar con la declaración: año cerrado, acumulado de diciembre o suma de los meses. */
+  function contableAnio(anio) {
+    let b = S.an.docs.get(anio)?.b, fuente = b ? "balance anual por tercero (Años cerrados)" : null;
+    if (!b) { const x = S.hist.get(`${anio}-12`); if (x && x.tipo === "acumulado") { b = x; fuente = "balance acumulado de diciembre"; } }
+    if (b) return { fuente, ns: (p) => Motor.valor(b, p, "ns") };
+    const ms = [...Array(12).keys()].map((i) => S.hist.get(`${anio}-${String(i + 1).padStart(2, "0")}`));
+    if (ms.every((m) => m && m.tipo === "mensual")) {
+      // Saldos del balance de diciembre; resultados: suma de los movimientos de los 12 meses.
+      return { fuente: "balances mensuales de enero a diciembre", ns: (p) => (/^[4-7]/.test(p) ? ms.reduce((s, m) => s + Motor.valor(m, p, "mov"), 0) : Motor.valor(ms[11], p, "ns")) };
+    }
+    return null;
+  }
+  function cruceRenta(anio) {
+    const C = contableAnio(anio), d = rentaVigente(anio);
+    if (!C || !d) return null;
+    const v = (ps) => ps.reduce((s, p) => s + (p[0] === "-" ? -C.ns(p.slice(1)) : C.ns(p)), 0);
+    const L = [
+      [36, "11", v(["11"])], [37, "12", v(["12"])], [38, "13", v(["13"])], [39, "14", v(["14"])], [40, "16", v(["16"])], [42, "15", v(["15"])], [43, "17, 18 y 19", v(["17", "18", "19"])],
+      [44, "1", v(["1"])], [45, "2", -v(["2"])], [46, "1 + 2", v(["1", "2"])],
+      [47, "41 (créditos sin 4175)", -(v(["41"]) - v(["4175"]))], [48, "4210", -v(["4210"])], [57, "42 sin 4210", -(v(["42"]) - v(["4210"]))],
+      [58, "41 sin 4175 + 42", -(v(["41"]) - v(["4175"]) + v(["42"]))], [59, "4175", v(["4175"])], [61, "4", -v(["4"])],
+      [62, "6 y 7", v(["6", "7"])], [63, "51", v(["51"])], [64, "52", v(["52"])], [65, "5305", v(["5305"])], [66, "53 sin 5305 + 59", v(["53", "59"]) - v(["5305"])],
+      [67, "51, 52, 53, 59, 6 y 7", v(["51", "52", "53", "59", "6", "7"])], [96, "54", v(["54"])],
+    ];
+    return { fuente: C.fuente, d, filas: L.map(([n, cuentas, contable]) => ({ n, cuentas, contable, declarado: d.R[n] ?? null, dif: d.R[n] == null ? null : d.R[n] - contable })) };
+  }
+
+  function vistaRenta() {
+    let html = "";
+    if (RT.ocupado) html += `<div class="aviso info"><p><span class="girando" aria-hidden="true"></span>${esc(RT.ocupado)}</p></div>`;
+    if (RT.error) html += `<div class="aviso error"><p>${esc(RT.error)}</p></div>`;
+    html += `<section class="panel"><h2>Declaraciones de renta presentadas</h2>
+      <p class="sub">Guarde aquí el formulario 110 de cada año, en el PDF que descarga de la DIAN. La app lee todos los renglones, guarda también el PDF original y los deja listos para requerimientos: comparación entre años, cruce con la contabilidad y Excel.</p>
+      <div class="zona" id="zona-rt" tabindex="0" role="button" aria-label="Cargar declaraciones de renta"><b>Arrastre aquí los PDF del formulario 110 o haga clic para buscarlos</b><span>Puede cargar varios años juntos. Si hay corrección, cargue también la nueva: queda vigente la de fecha más reciente.</span></div></section>`;
+    const docs = [...RT.docs.values()].sort((a, b) => b.anio - a.anio || (b.fecha || "").localeCompare(a.fecha || ""));
+    if (!docs.length) return html + `<section class="panel"><p class="vacio">Todavía no hay declaraciones de renta guardadas.</p></section>`;
+    html += `<section class="panel"><div class="fila" style="justify-content:space-between"><h2>Guardadas</h2><button class="btn" data-rt="excel">Excel (todas)</button></div><div class="tabla-env"><table class="lista"><thead><tr><th>Año gravable</th><th>Formulario</th><th>Presentada</th><th class="num">Patrimonio líquido (46)</th><th class="num">Ingresos brutos (58)</th><th class="num">Renta líquida gravable (79)</th><th class="num">Impuesto a cargo (99)</th><th class="num">Saldo a pagar (113)</th><th class="num">Saldo a favor (114)</th><th>Lectura</th><th></th></tr></thead><tbody>
+      ${docs.map((d) => { const vig = rentaVigente(d.anio) === d, malos = (d.controles || []).filter((c) => !c.ok); return `<tr${vig ? "" : ' style="opacity:.6"'}><td><b>${d.anio}</b>${vig ? "" : "<small>corregida por otra posterior</small>"}</td><td>${esc(d.formulario)}</td><td>${esc(fechaC(d.fecha || ""))}</td>
+        <td class="num">${fmt(d.R[46])}</td><td class="num">${fmt(d.R[58])}</td><td class="num">${fmt(d.R[79])}</td><td class="num">${fmt(d.R[99])}</td><td class="num">${fmt(d.R[113])}</td><td class="num">${fmt(d.R[114])}</td>
+        <td>${malos.length ? `<span class="chip error" title="${esc(malos.map((c) => c.t).join("; "))}">${malos.length} controles</span>` : `<span class="chip ok" title="Los totales del formulario cuadran con sus renglones">Verificada</span>`}</td>
+        <td class="num">${RT.confirmar === d.id ? `<button class="btn chico peligro" data-rt="borrar" data-id="${esc(d.id)}">Eliminar</button> <button class="btn chico" data-rt="cancelar">No</button>` : `${d.pdf ? `<button class="btn chico" data-rt="pdf" data-id="${esc(d.id)}">PDF</button> ` : ""}<button class="btn chico" data-rt="pedir-borrar" data-id="${esc(d.id)}">Eliminar</button>`}</td></tr>`; }).join("")}
+      </tbody></table></div></section>`;
+    // Comparativo de todos los renglones, un año por columna (declaración vigente).
+    const as = aniosRenta(), vig = as.map(rentaVigente);
+    const filasR = Object.keys(R110).map(Number).filter((n) => RT.verTodos || vig.some((d) => d.R[n]));
+    html += `<section class="panel"><div class="fila" style="justify-content:space-between"><div><h2>Renglón por renglón</h2><p class="sub" style="margin:0">Declaración vigente de cada año.</p></div>
+      <label class="cq-chk"><input type="checkbox" data-rtf="todos" ${RT.verTodos ? "checked" : ""}> Mostrar también los renglones en cero</label></div>
+      <div class="tabla-env"><table class="lista cq"><thead><tr><th>Renglón</th>${as.map((a) => `<th class="num">${a}</th>`).join("")}${as.length > 1 ? `<th class="num">Variación ${as.at(-2)}–${as.at(-1)}</th>` : ""}</tr></thead><tbody>
+      ${filasR.map((n) => { const sec = SEC110.find(([k]) => k === n); const vs = vig.map((d) => d.R[n]); const tot = [44, 46, 58, 61, 67, 72, 75, 79, 91, 94, 96, 99, 107, 113, 114].includes(n);
+        return `${sec ? `<tr class="dn-grp"><td colspan="${as.length + 2}"><b>${esc(sec[1])}</b></td></tr>` : ""}<tr${tot ? ' class="dn-tot"' : ""}><td><b>${n}</b> ${esc(R110[n])}</td>${vs.map((x) => `<td class="num">${x == null ? "—" : fmt(x)}</td>`).join("")}${as.length > 1 ? `<td class="num">${vs.at(-1) != null && vs.at(-2) != null ? fmt(vs.at(-1) - vs.at(-2)) : ""}</td>` : ""}</tr>`; }).join("")}
+      </tbody></table></div></section>`;
+    // Cruce con la contabilidad
+    const conCruce = as.filter((a) => contableAnio(a));
+    if (conCruce.length) {
+      if (!conCruce.includes(RT.anioCruce)) RT.anioCruce = conCruce.at(-1);
+      const X = cruceRenta(RT.anioCruce);
+      html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start"><div><h2>Cruce con la contabilidad · ${RT.anioCruce}</h2>
+        <p class="sub" style="margin:0">Declaración ${esc(X.d.formulario)} frente al ${esc(X.fuente)}. Las diferencias pueden ser normales (gastos no deducibles, reclasificaciones fiscales, redondeo a miles); son las que conviene tener explicadas ante un requerimiento.</p></div>
+        <select id="rt-cruce" aria-label="Año del cruce">${conCruce.map((a) => `<option value="${a}" ${a === RT.anioCruce ? "selected" : ""}>${a}</option>`).join("")}</select></div>
+        <div class="tabla-env"><table class="lista cq"><thead><tr><th>Renglón</th><th>Cuentas</th><th class="num">Declarado</th><th class="num">Contabilidad</th><th class="num">Diferencia</th></tr></thead><tbody>
+        ${X.filas.map((f) => `<tr><td><b>${f.n}</b> ${esc(R110[f.n])}</td><td><small>${esc(f.cuentas)}</small></td><td class="num">${f.declarado == null ? "—" : fmt(f.declarado)}</td><td class="num">${fmt(f.contable)}</td><td class="num${f.dif != null && Math.abs(f.dif) >= 1000 ? " neg" : ""}">${f.dif == null ? "" : Math.abs(f.dif) < 1000 ? "✓" : fmt(f.dif)}</td></tr>`).join("")}
+        </tbody></table></div><p class="pie">Diferencias menores a $1.000 se toman como redondeo (la declaración va en miles). Renglón 96 frente a la cuenta 54: impuesto de renta registrado en resultados.</p></section>`;
+    } else html += `<section class="panel"><p class="pie" style="margin:0">Para cruzar las declaraciones con la contabilidad, cargue el balance del año (en Años cerrados para 2023 y 2024, o los balances mensuales).</p></section>`;
+    return html;
+  }
+  async function excelRenta() {
+    try {
+      await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
+      if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
+      const as = aniosRenta(), vig = as.map(rentaVigente), e = S.cfg.empresa;
+      const wb = XLSX.utils.book_new();
+      const aoa = [[e.razon], [`NIT ${e.nit}`], ["Declaraciones de renta presentadas (formulario 110)"], [],
+        ["Renglón", "Concepto", ...as.map(String)], ["", "Formulario", ...vig.map((d) => d.formulario)], ["", "Fecha de presentación", ...vig.map((d) => d.fecha || "")],
+        ...Object.keys(R110).map(Number).map((n) => [n, R110[n], ...vig.map((d) => d.R[n] ?? null)])];
+      const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = [{ wch: 8 }, { wch: 60 }, ...as.map(() => ({ wch: 16 }))];
+      XLSX.utils.book_append_sheet(wb, ws, "Renglones");
+      for (const a of as.filter((x) => contableAnio(x))) {
+        const X = cruceRenta(a);
+        const wc = XLSX.utils.aoa_to_sheet([[`Cruce declaración ${a} (${X.d.formulario}) con la contabilidad`], [`Fuente: ${X.fuente}`], [], ["Renglón", "Concepto", "Cuentas", "Declarado", "Contabilidad", "Diferencia"],
+          ...X.filas.map((f) => [f.n, R110[f.n], f.cuentas, f.declarado, Math.round(f.contable), f.dif == null ? null : Math.round(f.dif)])]);
+        wc["!cols"] = [8, 50, 22, 16, 16, 16].map((w) => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, wc, `Cruce ${a}`);
+      }
+      await guardarArchivo("Declaraciones_renta_110.xlsx", XLSX.write(wb, { type: "array", bookType: "xlsx" }));
+    } catch (err) { toast(`No se pudo generar el Excel: ${err.message}`); }
+  }
+  function clicRenta(t) {
+    if (t.id === "zona-rt") { $("#archivo-rt").click(); return true; }
+    const a = t.dataset.rt; if (!a) return false;
+    if (a === "pdf") descargarPdfRenta(t.dataset.id);
+    else if (a === "pedir-borrar") { RT.confirmar = t.dataset.id; render(); }
+    else if (a === "cancelar") { RT.confirmar = null; render(); }
+    else if (a === "borrar") borrarRenta(t.dataset.id);
+    else if (a === "excel") excelRenta();
+    return true;
+  }
+  function cambioRenta(el) {
+    if (el.id === "archivo-rt") { if (el.files.length) leerArchivosRenta([...el.files]); el.value = ""; return true; }
+    if (el.id === "rt-cruce") { RT.anioCruce = Number(el.value); render(); return true; }
+    if (el.dataset.rtf === "todos") { RT.verTodos = el.checked; render(); return true; }
+    return false;
+  }
+
   /* ------------------------------------------------------------ descargas (con manejo de permisos) */
   function avisoDescarga(html, boton) {
     const a = $("#aviso-dl");
@@ -9297,8 +9927,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
 
   /* ------------------------------------------------------------ eventos */
   document.addEventListener("click", (ev) => {
-    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq");
+    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
     if (!t) return;
+    if ((t.id === "zona-rt" || t.dataset.rt) && clicRenta(t)) return;
+    if ((t.id === "zona-an" || t.dataset.an) && clicAnual(t)) return;
     if ((t.id === "zona-cq" || t.dataset.cq) && clicConsulta(t)) return;
     if ((t.id === "zona-dn" || t.dataset.dn || t.dataset.dndif !== undefined) && clicDian(t)) return;
     if (t.id === "zona-pv") return $("#archivo-pv").click();
@@ -9375,6 +10007,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (S.tab === "bancos" && entradaBancos(el)) return;
     if (entradaDian(el)) return;
     if (entradaConsulta(el)) return;
+    if (entradaAnual(el)) return;
     if (el.id === "pv-filtro") { S.pv.filtro = el.value; clearTimeout(S.pv.h); S.pv.h = setTimeout(() => { render(); const f = $("#pv-filtro"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }, 250); return; }
     if (!S.borrador) return;
     if (el.dataset.cfg) { asignar(S.borrador, el.dataset.cfg, valorCampo(el, el.dataset.cfg)); marcarSucio(); }
@@ -9385,6 +10018,8 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (cambioBancos(el)) return;
     if (cambioDian(el)) return;
     if (cambioConsulta(el)) return;
+    if (cambioAnual(el)) return;
+    if (cambioRenta(el)) return;
     if (el.id === "archivo-pv" && el.files.length) { leerArchivosPV([...el.files]); el.value = ""; return; }
     if (el.id === "pv-corte") { S.pv.corte = el.value; return render(); }
     if (el.id === "pv-alcance") { S.pv.alcance = el.value; return; }
@@ -9447,10 +10082,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     const sub = $("#vista .panel .sub"); if (sub) sub.textContent = "Hay cambios sin guardar.";
   }
   // Arrastrar y soltar
-  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
-  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq"); if (z) z.classList.remove("sobre"); });
-  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id === "zona-dn") return leerArchivosDian(fs); if (z.id === "zona-cq") return leerArchivosAux(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
-  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-cq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-cq").click(); return; } if (ev.target.id === "zona-dn" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-dn").click(); return; } if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
+  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
+  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt"); if (z) z.classList.remove("sobre"); });
+  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id === "zona-dn") return leerArchivosDian(fs); if (z.id === "zona-cq") return leerArchivosAux(fs); if (z.id === "zona-an") return leerArchivosAnual(fs); if (z.id === "zona-rt") return leerArchivosRenta(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
+  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-rt" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rt").click(); return; } if (ev.target.id === "zona-an" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-an").click(); return; } if (ev.target.id === "zona-cq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-cq").click(); return; } if (ev.target.id === "zona-dn" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-dn").click(); return; } if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
 
   /* ------------------------------------------------------------ base de datos */
   function estadoDB(texto, mal) { const e = $("#estado-db"); e.textContent = texto; e.classList.toggle("mal", Boolean(mal)); }
@@ -9524,6 +10159,17 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     db.doc("verifDianMarcas/general").onSnapshot((snap) => {
       S.dn.marcas = snap.exists ? { ...snap.data() } : {};
       if (!S.cargando && S.tab === "dian" && !S.dn.ocupado && !document.activeElement?.dataset?.dnmarca) render();
+    }, () => {});
+    db.collection("renta").onSnapshot((snap) => {
+      const prev = S.rt.docs;
+      S.rt.docs = new Map(snap.docs.map((d) => { const x = d.data(); x.anio = Number(x.anio); if (prev.get(d.id)?._pdf) x._pdf = prev.get(d.id)._pdf; return [d.id, x]; }));
+      if (!S.cargando && (S.tab === "renta" || S.tab === "impuestos") && !S.rt.ocupado) render();
+    }, () => {});
+    db.collection("anuales").onSnapshot((snap) => {
+      const m = new Map();
+      for (const d of snap.docs) { try { const x = d.data(); const b = Motor.deDocumento(x.balance); b.cargado = x.cargado; m.set(Number(x.anio), { meta: x, b }); } catch (err) { console.error("Año ilegible", d.id, err); } }
+      S.an.docs = m; S.an.cacheD = null;
+      if (!S.cargando && (S.tab === "anual" || S.tab === "consulta") && !S.an.ocupado) render();
     }, () => {});
     db.collection("auxiliar").onSnapshot((snap) => {
       S.cq.metas = new Map(snap.docs.map((d) => [d.id, d.data()]));
