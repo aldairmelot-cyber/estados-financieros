@@ -17,7 +17,7 @@ Se guarda en las colecciones `anuales` y `anualesPartes`. No toca el histórico 
 
 ## Requerimientos DIAN
 
-En **Requerimientos DIAN** se registra cada requerimiento (número, fecha, expediente, año, fecha de notificación y plazo) con sus numerales, a partir del modelo de requerimiento ordinario de renta. Para cada numeral se lleva el estado, el responsable y notas, y se guarda el PDF recibido (colecciones `requerimientos` y `requerimientosPdf`).
+En **Requerimientos DIAN** se suelta el PDF del requerimiento tal como llega (si es escaneado se lee con OCR en el navegador, Tesseract.js) y la app llena número, fecha, expediente, año, correos y cada numeral, con el documento que lo responde y su botón de descarga. El libro mayor y balances y la certificación de diferencia en cambio salen en PDF diseñado, con folios y firmas. También se puede registrar a mano (número, fecha, expediente, año, fecha de notificación y plazo) con sus numerales, a partir del modelo de requerimiento ordinario de renta. Para cada numeral se lleva el estado, el responsable y notas, y se guarda el PDF recibido (colecciones `requerimientos` y `requerimientosPdf`).
 
 Con el balance por tercero del año (Años cerrados), el libro auxiliar (Consulta de movimientos) y la declaración de renta, la app genera los anexos en Excel, una hoja por numeral, cada una cuadrada contra el renglón declarado:
 

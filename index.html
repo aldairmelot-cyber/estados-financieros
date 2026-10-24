@@ -389,6 +389,8 @@ table.dn th.dn-grp { text-align: center; border-bottom: 1px solid var(--linea); 
 .cq-filtros .cq-chk label, label.cq-chk { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; color: var(--tinta); font-size: 13px; white-space: nowrap; }
 .cq-filtros .cq-chk { grid-column: 1 / -1; }
 .btn[aria-pressed="true"] { background: var(--acento); color: var(--sobre-acento); border-color: var(--acento); }
+table.rq-tabla td { vertical-align: top; }
+table.rq-tabla td.num small { display: block; color: var(--suave); font-size: 11px; margin-top: 4px; white-space: normal; word-break: break-all; max-width: 210px; margin-left: auto; }
 .cq-link { border: 0; background: none; padding: 0; color: var(--acento); font: inherit; font-weight: 600; cursor: pointer; text-align: left; white-space: nowrap; }
 .cq-link:hover { text-decoration: underline; }
 table.cq td small, table.cq td .cq-link + small { display: block; color: var(--suave); font-size: 11.5px; }
@@ -441,6 +443,7 @@ table.cq small.neg, .lista small.neg { color: var(--error); display: block; }
 <input type="file" id="archivo-an" accept=".xls,.xlsx" multiple hidden>
 <input type="file" id="archivo-rt" accept=".pdf" multiple hidden>
 <input type="file" id="archivo-rq" accept=".pdf" hidden>
+<input type="file" id="archivo-rq-nuevo" accept=".pdf" multiple hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -10228,10 +10231,24 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     try {
       RQ.error = ""; RQ.ocupado = `Preparando el numeral ${n}…`; render();
       if (it.tipo === "eeff") {
-        await libreriasRQ(true);
+        await pdfLibreriasRQ();
         const data = pdfEEFFRQ(q.anio);
         RQ.ocupado = ""; render();
         await guardarArchivo(nombreArchRQ(q, it, "pdf"), data);
+      } else if (it.tipo === "mayor" || it.tipo === "cambio") {
+        await pdfLibreriasRQ();
+        const X = await datosRQ(q.anio, false);
+        if (formatoNumeralRQ(it, X) === "pdf") {
+          const data = it.tipo === "mayor" ? pdfMayorRQ(X, q) : pdfCambioRQ(X, q);
+          RQ.ocupado = ""; render();
+          await guardarArchivo(nombreArchRQ(q, it, "pdf"), data);
+        } else {
+          const data = libroRQ(q, GEN_RQ[it.tipo](X, it).map((h) => ({ ...h, it })), false);
+          RQ.ocupado = ""; render();
+          await guardarArchivo(nombreArchRQ(q, it, "xlsx"), data);
+        }
+      } else if (it.tipo === "otro") {
+        throw new Error("Este numeral es un documento que debe adjuntar usted (no se genera con la contabilidad).");
       } else {
         await libreriasRQ(false);
         const { hojas } = await anexosRQ(q, n);
@@ -10249,7 +10266,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
   async function zipRQ(q) {
     try {
       RQ.error = ""; RQ.ocupado = "Preparando los archivos del requerimiento…"; render();
-      await libreriasRQ(true);
+      await pdfLibreriasRQ();
       const A = await anexosRQ(q);
       const CFB = XLSX.CFB, zip = CFB.utils.cfb_new();
       const carpeta = `Respuesta_${q.numero}_AG${q.anio}`;
@@ -10267,13 +10284,24 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         const hs = A.hojas.filter((h) => h.it === it);
         const err = hs.find((h) => h.error);
         if (err) { faltan.push(`${it.n}. ${TIPO_RQ[it.tipo] || "Anexo"}: no se pudo generar (${err.error})`); continue; }
+        if (it.tipo === "mayor") {
+          try { add(nom("pdf"), await pdfMayorRQ(A.X, q).arrayBuffer()); } catch (err) { faltan.push(`${it.n}. Libro mayor en PDF: ${err.message}`); }
+          if (hs.length) add(nom("xlsx"), libroRQ(q, hs, false));
+          hechos.push(it.n);
+          faltan.push(`${it.n}. ${nom("pdf")}: imprimir, firmar y escanear. Si el libro está registrado o foliado en el software contable, envíen la copia escaneada de ese libro oficial.`);
+          continue;
+        }
+        if (it.tipo === "cambio" && hs[0]?.resumen?.sinMovimiento) {
+          try { add(nom("pdf"), await pdfCambioRQ(A.X, q).arrayBuffer()); hechos.push(it.n); } catch (err) { faltan.push(`${it.n}. Certificación de diferencia en cambio: ${err.message}`); }
+          faltan.push(`${it.n}. ${nom("pdf")}: confirmar que no hubo operaciones en moneda extranjera, firmar y escanear.`);
+          continue;
+        }
         if (hs.length) { add(nom("xlsx"), libroRQ(q, hs, false)); hechos.push(it.n); }
-        if (it.tipo === "mayor") faltan.push(`${it.n}. Adjuntar la copia escaneada del libro mayor y balances oficial (impreso del software contable). El Excel ${nom("xlsx")} es un soporte adicional.`);
         if (it.tipo === "pasivos") faltan.push(`${it.n}. En ${nom("xlsx")}, completar las columnas «POR COMPLETAR» (objeto y soporte de los préstamos) y adjuntar los soportes.`);
         if (it.tipo === "costos" || it.tipo === "retenciones" || it.tipo === "pasivos") for (const h of hs) if (h.resumen?.dif != null && Math.abs(h.resumen.dif) >= 1000) faltan.push(`${it.n}. ${h.nombre}: explicar la diferencia de $ ${fmt(h.resumen.dif)} frente al renglón ${h.resumen.renglon || ""} declarado (conciliación fiscal, formato 2516).`);
         if (it.tipo === "retenciones") faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista.`);
         if (it.tipo === "certificados") faltan.push(`${it.n}. Pedir y adjuntar el certificado tributario anual de cada entidad de ${nom("xlsx")}.`);
-        if (it.tipo === "cambio") faltan.push(`${it.n}. Confirmar que no hubo operaciones en moneda extranjera antes de responder que no hay diferencia en cambio.`);
+        if (it.tipo === "cambio") faltan.push(`${it.n}. Hay movimiento en cuentas de diferencia en cambio: completar el cuadro con facturas, TRM y pagos, y adjuntar los soportes.`);
         if (it.tipo === "otro") faltan.push(`${it.n}. ${textoItem(it, q)}`);
       }
       add(`00_Indice_anexos_AG${q.anio}.xlsx`, libroRQ(q, A.hojas, true, true));
@@ -10287,6 +10315,209 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       await guardarArchivo(`${carpeta}.zip`, new Uint8Array(data));
       await avanceRQ(q, hechos);
     } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `No se pudieron preparar los archivos: ${err.message}`; render(); }
+  }
+
+  /* ---------- lectura automática del requerimiento (PDF con texto o escaneado, por OCR) */
+  const MESES_RQ = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10, noviembre: 11, diciembre: 12 };
+  const nrmRQ = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  /** Tipo de anexo según el texto del numeral. */
+  function tipoNumeralRQ(t) {
+    const x = nrmRQ(t);
+    if (/estados? financieros/.test(x)) return "eeff";
+    if (/libro mayor/.test(x)) return "mayor";
+    if (/balance de prueba/.test(x)) return "balance";
+    if (/renglon(es)? 106|otras retenciones/.test(x)) return "retenciones";
+    if (/renglon(es)? ?45\b|valor total de los pasivos/.test(x)) return "pasivos";
+    if (/ingresos brutos|renglon 58\b/.test(x)) return "ingresos";
+    if (/devoluciones|renglon 59\b/.test(x)) return "devoluciones";
+    if (/compras de inventario|renglon 39\b/.test(x)) return "compras";
+    if (/renglon(es)?\s*6[2-6]\b/.test(x)) return "costos";
+    if (/certificados? anuales? tributari|entidades financieras/.test(x)) return "certificados";
+    if (/diferencia en cambio/.test(x)) return "cambio";
+    return "otro";
+  }
+  /** Interpreta el texto del requerimiento: encabezado, numerales, correos y funcionario que proyectó. */
+  function parsearRQ(texto, archivo = "") {
+    const T = String(texto).replace(/\r/g, "").replace(/[ \t]+/g, " ");
+    const m = (re) => (T.match(re) || [])[1] || "";
+    const numero = m(/N[uú]mero\s*:?\s*(\d{12,20})/i) || m(/Informaci[oó]n\s+No\.?\s*(\d{12,20})/i) || (String(archivo).match(/(\d{12,20})/) || [])[1] || "";
+    let fecha = "";
+    const f = T.match(/de\s+fecha\s*:?\s*(\d{1,2})\s+de\s+([A-Za-zÁÉÍÓÚáéíóú]+)\s+de\s+(\d{4})/i);
+    if (f && MESES_RQ[nrmRQ(f[2])]) fecha = `${f[3]}-${String(MESES_RQ[nrmRQ(f[2])]).padStart(2, "0")}-${f[1].padStart(2, "0")}`;
+    const expediente = m(/EXPEDIENTE\s*:?\s*(\d{8,})/i);
+    const anio = Number(m(/\bA[ÑN]O\s*:?\s*(\d{4})/) || m(/a[ñn]o\s+gravable\s+(\d{4})/i)) || null;
+    const impuesto = (m(/IMPUESTO\s*:?\s*([^\n]+)/) || "").trim().replace(/\s+/g, " ") || "Impuesto sobre la renta y complementarios";
+    const titulo = (m(/(REQUERIMIENTO\s+[A-ZÁÉÍÓÚ ]+)/) || "REQUERIMIENTO").trim();
+    const plazo = Number(m(/dentro\s+de\s+(?:los\s+)?(\d{1,2})\s*d[ií]as/i)) || 15;
+    // Correos: el OCR suele leer la @ como "(O", "Q" o "©".
+    const T2 = T.replace(/\s*[(\[]?\s*[OQ0@©®]\s*(dian\.gov\.co)/gi, "@$1");
+    const VACIAS = /^(con|copia|cop[ií]a|al|a|el|la|correo|electr[oó]nico|y|en|de)$/i;
+    const correos = [...T2.matchAll(/([a-z0-9][a-z0-9._]*(?:[ _]+[a-z0-9._]+)*)@dian\.gov\.co/gi)].map((x) => {
+      const ps = x[1].split(/\s+/);
+      while (ps.length > 1 && VACIAS.test(ps[0])) ps.shift();
+      return ps.join("_").replace(/_+/g, "_").toLowerCase() + "@dian.gov.co";
+    });
+    const proyecto = (m(/Proyect[oó]\s*:\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ ]{4,60})/) || "").trim();
+    // Numerales: del primer "1." al aviso de sanción, sin los encabezados de página.
+    let cuerpo = T.split(/\n\s*De no d[aá]rsele|\n\s*De no darsele/i)[0];
+    cuerpo = cuerpo.replace(/\n[^\n]*P[aá]gina\s+No\.?[^\n]*\n/gi, "\n").replace(/\n[^\n]*Continuaci[oó]n del Requerimiento[^\n]*\n(?:[^\n]*fecha[^\n]*\n)?/gi, "\n").replace(/\n[^\n]*C[oó]digo Acto[^\n]*\n/gi, "\n");
+    const ini = cuerpo.search(/\n\s*1\s*[.,)]\s+\S/);
+    const items = [];
+    if (ini >= 0) {
+      const partes = cuerpo.slice(ini).split(/\n\s*(\d{1,2})\s*[.,)]\s+/);
+      // partes: ["", "1", texto, "2", texto…]; solo se aceptan números consecutivos.
+      let esperado = 1, actual = null;
+      for (let i = 1; i < partes.length; i += 2) {
+        const n = Number(partes[i]), t = partes[i + 1] || "";
+        if (n === esperado) { actual = { n, texto: t }; items.push(actual); esperado++; }
+        else if (actual) actual.texto += ` ${partes[i]}. ${t}`;
+      }
+    }
+    for (const it of items) {
+      it.texto = it.texto.replace(/\s*\n\s*/g, " ").replace(/\s+/g, " ").replace(/[ ,.]+$/, ".").trim();
+      it.tipo = tipoNumeralRQ(it.texto);
+      if (it.tipo === "costos") it.renglones = [...new Set((it.texto.slice(0, 80).match(/\b6[2-6]\b/g) || []))].join(", ");
+    }
+    const nitEmp = S.cfg.empresa.nit.replace(/\D/g, "").slice(0, 9);
+    const avisos = [];
+    if (nitEmp && !T.replace(/[^\d]/g, "").includes(nitEmp)) avisos.push("No se encontró el NIT de la empresa en el documento: verifique que el requerimiento sea de esta sociedad.");
+    if (!numero) avisos.push("No se pudo leer el número del requerimiento.");
+    if (!fecha) avisos.push("No se pudo leer la fecha del requerimiento.");
+    if (!anio) avisos.push("No se pudo leer el año gravable.");
+    if (!items.length) avisos.push("No se encontraron los numerales: agréguelos a mano.");
+    return { numero, fecha, expediente, anio, impuesto, titulo, plazo, correo: correos[0] || "", copia: correos.find((c, i) => i > 0 && c !== correos[0]) || "", proyecto, items, avisos };
+  }
+  async function textoPdfRQ(file, avisar) {
+    await asegurarLibreria("pdfjsLib", ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js", "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"]);
+    await asegurarLibreria("pdfjsWorker", ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js", "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"]);
+    if (!window.pdfjsLib) throw new Error("No se pudo cargar el lector de PDF. Recargue la página e intente de nuevo.");
+    const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+    const pags = [];
+    let texto = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const pg = await pdf.getPage(i); pags.push(pg);
+      const tc = await pg.getTextContent();
+      let ultY = null;
+      for (const it of tc.items) { const y = it.transform[5]; if (ultY != null && Math.abs(y - ultY) > 2) texto += "\n"; else if (ultY != null) texto += " "; texto += it.str; ultY = y; }
+      texto += "\n";
+    }
+    if (texto.replace(/\s/g, "").length > 300) return { texto, ocr: false };
+    // PDF escaneado: se lee la imagen de cada página con OCR en español.
+    avisar("El PDF es una imagen escaneada: cargando el lector de texto (OCR)…");
+    await asegurarLibreria("Tesseract", ["https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js", "https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js"]);
+    if (!window.Tesseract) throw new Error("No se pudo cargar el lector de texto (OCR). Revise la conexión a internet e intente de nuevo.");
+    const worker = await window.Tesseract.createWorker("spa");
+    texto = "";
+    try {
+      for (let i = 0; i < pags.length; i++) {
+        avisar(`Leyendo el texto de la página ${i + 1} de ${pags.length}…`);
+        const vp = pags[i].getViewport({ scale: 3 });
+        const cv = document.createElement("canvas"); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        await pags[i].render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+        const r = await worker.recognize(cv);
+        texto += (r.data?.text || "") + "\n";
+      }
+    } finally { try { await worker.terminate(); } catch { /* */ } }
+    return { texto, ocr: true };
+  }
+  async function cargarPdfsRQ(files) {
+    RQ.error = "";
+    for (const file of files) {
+      try {
+        RQ.ocupado = `Leyendo ${file.name}…`; render();
+        const { texto, ocr } = await textoPdfRQ(file, (t) => { RQ.ocupado = t; const e = $("#rq-ocupado"); if (e) e.textContent = t; });
+        const P = parsearRQ(texto, file.name);
+        if (!P.numero) throw new Error("no se pudo leer el número del requerimiento. Regístrelo con «Registrar a mano».");
+        const existente = RQ.docs.get(P.numero);
+        const items = P.items.length ? P.items.map((it) => ({ n: it.n, tipo: it.tipo, texto: it.texto, renglones: it.renglones || "", estado: "pendiente", resp: "", notas: "" }))
+          : MODELO_RQ.map(([tipo, texto, renglones], i) => ({ n: i + 1, tipo, texto, renglones: renglones || "", estado: "pendiente", resp: "", notas: "" }));
+        const q = existente ? { ...existente } : { numero: P.numero, creado: new Date().toISOString() };
+        Object.assign(q, { titulo: P.titulo, fecha: P.fecha || q.fecha || "", expediente: P.expediente || q.expediente || "", impuesto: P.impuesto, anio: P.anio || q.anio || new Date().getFullYear() - 1,
+          plazo: q.plazo || P.plazo, notificado: q.notificado || P.fecha || "", correo: P.correo || q.correo || "", copia: P.copia || q.copia || "", proyecto: P.proyecto || q.proyecto || "",
+          avisos: P.avisos, leidoOCR: ocr, textoLeido: texto.slice(0, 60000) });
+        // Si ya existía, se conservan estado, responsable y notas de los numerales que coinciden.
+        q.items = items.map((it) => { const ant = existente?.items?.find((x) => x.n === it.n && x.tipo === it.tipo); return ant ? { ...it, estado: ant.estado, resp: ant.resp, notas: ant.notas } : it; });
+        await guardarRQ(q);
+        await subirPdfRQ(q, file, true);
+        RQ.sel = q.numero; RQ.nuevo = null;
+        toast(`${existente ? "Actualizado" : "Registrado"} el requerimiento ${q.numero}: ${q.items.length} numerales${ocr ? " (leído por OCR: revise los datos)" : ""}.`);
+      } catch (err) { console.error(err); RQ.error = `${file.name}: ${err.message}`; }
+    }
+    RQ.ocupado = ""; render();
+  }
+
+  /* ---------- documentos diseñados en PDF */
+  async function pdfLibreriasRQ() {
+    await libreriasRQ(true);
+    if (!window.jspdf || !window.jspdf.jsPDF.API.autoTable) throw new Error("No se pudo cargar la librería de PDF.");
+  }
+  /** Libro mayor y balances del año: cuentas de mayor con saldo anterior, movimientos y nuevo saldo en débito y crédito. */
+  function pdfMayorRQ(X, q) {
+    return conPeriodo(`${X.y}-12`, () => {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "letter", orientation: "landscape" });
+      const W = doc.internal.pageSize.getWidth();
+      const y0 = pdfEncabezado(doc, { titulo: "Libro mayor y balances", periodoTexto: `Del 1 de enero al 31 de diciembre de ${X.y}` });
+      const dc = (v) => [v > 0.005 ? fmt(v) : "", v < -0.005 ? fmt(-v) : ""];
+      const body = [], est = [];
+      const sum = { sa: [0, 0], d: 0, c: 0, ns: [0, 0] };
+      for (const cod of X.b.codigos) {
+        const f = X.b.filas.get(cod);
+        if (f.dig > 4) continue;
+        if ([f.sa, f.d, f.c, f.ns].every((v) => Math.abs(v) < 0.005)) continue;
+        body.push([cod, limpiarPDF(f.nombre), ...dc(f.sa), f.d ? fmt(f.d) : "", f.c ? fmt(f.c) : "", ...dc(f.ns)]);
+        est.push(f.dig);
+        if (f.dig === 1) { sum.sa[0] += Math.max(f.sa, 0); sum.sa[1] += Math.max(-f.sa, 0); sum.d += f.d; sum.c += f.c; sum.ns[0] += Math.max(f.ns, 0); sum.ns[1] += Math.max(-f.ns, 0); }
+      }
+      body.push(["", "SUMAS IGUALES", fmt(sum.sa[0]), fmt(sum.sa[1]), fmt(sum.d), fmt(sum.c), fmt(sum.ns[0]), fmt(sum.ns[1])]); est.push(0);
+      doc.autoTable({
+        head: [[{ content: "Cuenta", rowSpan: 2 }, { content: "Nombre de la cuenta", rowSpan: 2 }, { content: "Saldo anterior", colSpan: 2 }, { content: "Movimientos del año", colSpan: 2 }, { content: "Nuevo saldo", colSpan: 2 }], ["Débito", "Crédito", "Débito", "Crédito", "Débito", "Crédito"]],
+        body, startY: y0, theme: "plain", margin: { left: 10, right: 10, top: 14, bottom: 16 },
+        styles: { font: "helvetica", fontSize: 7, cellPadding: { top: 0.7, bottom: 0.7, left: 1.2, right: 1.2 }, textColor: 20 },
+        headStyles: { fontStyle: "bold", fontSize: 6.8, textColor: MARINO, halign: "center", lineWidth: { bottom: 0.3 }, lineColor: MARINO },
+        columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 70 }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } },
+        didParseCell: (h) => {
+          if (h.section !== "body") return;
+          const d = est[h.row.index];
+          if (d === 1 || d === 0) { h.cell.styles.fontStyle = "bold"; h.cell.styles.fillColor = FONDO; }
+          else if (d === 2) h.cell.styles.fontStyle = "bold";
+          if (d === 0) { h.cell.styles.lineWidth = { top: 0.4 }; h.cell.styles.lineColor = MARINO; }
+        },
+      });
+      let y = doc.lastAutoTable.finalY + 4;
+      doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
+      doc.text(limpiarPDF(`Saldos tomados de los libros de contabilidad de ${S.cfg.empresa.razon} a 31 de diciembre de ${X.y}. Débitos ${fmt(sum.d)} = créditos ${fmt(sum.c)}.`), 10, y);
+      if (y + ALTO_FIRMAS > doc.internal.pageSize.getHeight() - 10) { doc.addPage("letter", "landscape"); y = 20; }
+      pdfFirmas(doc, y);
+      const n = doc.getNumberOfPages();
+      for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7); doc.setTextColor(110); doc.text(`Folio ${i} de ${n}`, W - 10, doc.internal.pageSize.getHeight() - 6, { align: "right" }); doc.text(limpiarPDF(`${S.cfg.empresa.razon} · NIT ${S.cfg.empresa.nit} · Libro mayor y balances ${X.y}`), 10, doc.internal.pageSize.getHeight() - 6); doc.setTextColor(20); }
+      return doc.output("blob");
+    });
+  }
+  /** Certificación de que no hubo diferencia en cambio (cuando las cuentas no tienen movimiento). */
+  function pdfCambioRQ(X, q) {
+    return conPeriodo(`${X.y}-12`, () => {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "letter" });
+      const W = doc.internal.pageSize.getWidth(), e = S.cfg.empresa;
+      let y = pdfEncabezado(doc, { titulo: "Certificación", periodoTexto: `Diferencia en cambio – año gravable ${X.y}` }) + 6;
+      const fir = firmantes(`${X.y}-12`);
+      const p = (t) => { doc.setFont("helvetica", "normal"); doc.setFontSize(10); for (const ln of doc.splitTextToSize(limpiarPDF(t), W - 50)) { doc.text(ln, 25, y); y += 5.2; } y += 3; };
+      p(`Los suscritos, ${fir.map((f) => `${f.nombre}, ${f.cargo}${f.tp ? ` (${f.tp})` : ""}`).join("; ")}, de ${e.razon}, identificada con NIT ${e.nit},`);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text("CERTIFICAMOS:", W / 2, y, { align: "center" }); y += 8;
+      p(`Que, de acuerdo con los libros de contabilidad, durante el año gravable ${X.y} (del 1 de enero al 31 de diciembre) la sociedad no realizó operaciones en moneda extranjera y, en consecuencia, no registró diferencia en cambio realizada ni no realizada.`);
+      p(`Que las cuentas de ingreso por diferencia en cambio (421020) y de gasto por diferencia en cambio (530525) no presentan movimiento en el período, como consta en el balance de prueba que se anexa al requerimiento.`);
+      p(`La presente certificación se expide en ${e.domicilio.split(",")[0]}, el ${new Date().toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" })}, con destino a la Dirección Seccional de Impuestos y Aduanas de Santa Marta, en respuesta al requerimiento ordinario No. ${q.numero}${q.fecha ? ` del ${fechaLarga(q.fecha)}` : ""}.`);
+      pdfFirmas(doc, y);
+      return doc.output("blob");
+    });
+  }
+  /** Qué archivo baja cada numeral. */
+  function formatoNumeralRQ(it, X) {
+    if (it.tipo === "eeff" || it.tipo === "mayor") return "pdf";
+    if (it.tipo === "cambio") { try { if (X) return GEN_RQ.cambio(X)[0].resumen.sinMovimiento ? "pdf" : "xlsx"; } catch { /* */ } return "pdf"; }
+    if (it.tipo === "otro") return null;
+    return "xlsx";
   }
 
   /* ---------- carta de respuesta (Word) */
@@ -10305,7 +10536,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         if (it.estado === "noaplica") t = "No aplica para la sociedad en el año gravable.";
         else switch (it.tipo) {
           case "eeff": t = `Se adjuntan los estados financieros del año gravable ${q.anio} (estado de situación financiera, estado de resultado integral, estado de cambios en el patrimonio, estado de flujos de efectivo y notas), firmados por el representante legal, el contador y el revisor fiscal.`; break;
-          case "mayor": t = `Se adjunta copia escaneada del libro mayor y balances a 31 de diciembre de ${q.anio}. En la hoja «${hs[0] ? "Mayor y balances" : ""}» del archivo de anexos se incluyen además los saldos por cuenta de mayor en Excel.`; break;
+          case "mayor": t = `Se adjunta copia escaneada del libro mayor y balances a 31 de diciembre de ${q.anio}, firmado, y los mismos saldos en Excel.`; break;
           case "balance": t = `Se adjunta en Excel el balance de prueba a 8 dígitos por tercero del 1 de enero al 31 de diciembre de ${q.anio}. ${r.texto || ""}`; break;
           case "pasivos": t = `Se adjunta en Excel la relación de los pasivos a 31 de diciembre de ${q.anio} por tercero, con la fecha de inicio de cada obligación, los aumentos y abonos del año y el saldo final, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 45${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}. Para los préstamos de dinero se indica el objeto y el soporte de la forma como se recibieron [COMPLETAR en el Excel: objeto y soporte de cada préstamo].`; break;
           case "ingresos": t = `Se adjunta en Excel la relación de los ingresos brutos por tercero acumulados a 31 de diciembre de ${q.anio}, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 58.`; break;
@@ -10314,7 +10545,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           case "costos": t = `Se adjunta en Excel, en una hoja por renglón, la relación de los costos y gastos por concepto y tercero: ${hs.map((h) => `renglón ${h.resumen.renglon} ${m(h.resumen.neto)} (declarado ${m(h.resumen.declarado)})`).join("; ")}. En cada hoja se parte del valor contable y se muestra la conciliación con el valor declarado; la diferencia corresponde a [COMPLETAR: partidas no deducibles y ajustes fiscales, según la conciliación fiscal – formato 2516].`; break;
           case "retenciones": t = `Se adjunta en Excel la relación de las otras retenciones por agente retenedor, con el concepto, la base y el valor retenido, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 106${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}, junto con los certificados de retención expedidos por los agentes retenedores.`; break;
           case "certificados": t = `Se adjuntan copias de los certificados tributarios anuales expedidos por las entidades financieras (${(r.texto || "").replace(/\.$/, "")}) que soportan lo deducido por intereses, comisiones, servicios y GMF.`; break;
-          case "cambio": t = r.sinMovimiento ? `Durante el año gravable ${q.anio} la sociedad no realizó operaciones en moneda extranjera; por lo tanto, no registró diferencia en cambio realizada ni no realizada.` : `Se adjunta el cuadro explicativo de la diferencia en cambio realizada y no realizada con sus auxiliares y soportes.`; break;
+          case "cambio": t = r.sinMovimiento ? `Durante el año gravable ${q.anio} la sociedad no realizó operaciones en moneda extranjera; por lo tanto, no registró diferencia en cambio realizada ni no realizada. Se adjunta la certificación firmada por el representante legal, el contador y el revisor fiscal.` : `Se adjunta el cuadro explicativo de la diferencia en cambio realizada y no realizada con sus auxiliares y soportes.`; break;
           default: t = "Se adjunta la información solicitada.";
         }
         return `<p><b>${it.n}.</b> <i>${esc(textoItem(it, q))}</i></p><p><b>Respuesta:</b> ${esc(t)}</p>`;
@@ -10327,7 +10558,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         Expediente: ${esc(q.expediente || "")}<br>Contribuyente: ${esc(e.razon)} – NIT ${esc(e.nit)}<br>${esc(q.impuesto)} – Año gravable ${q.anio}</p><br>
         <p>${esc(rep?.nombre || "")}, identificada con cédula de ciudadanía No. [COMPLETAR], en calidad de ${esc(rep?.cargo || "representante legal")} de ${esc(e.razon)}, sociedad identificada con NIT ${esc(e.nit)}, según el certificado de existencia y representación legal que se adjunta, y dentro del término señalado en el artículo 686 del Estatuto Tributario, doy respuesta al requerimiento de la referencia en el orden en que fue formulado:</p>
         ${parr}
-        <p><b>Anexos:</b> un archivo por numeral (${q.items.filter((it) => it.estado !== "noaplica" && it.tipo !== "otro").map((it) => esc(nombreArchRQ(q, it, it.tipo === "eeff" ? "pdf" : "xlsx"))).join(", ")}); estados financieros firmados; copia del libro mayor y balances; certificados de retención y certificados tributarios de las entidades financieras; certificado de existencia y representación legal.</p><br>
+        <p><b>Anexos:</b> un archivo por numeral (${q.items.filter((it) => it.estado !== "noaplica" && it.tipo !== "otro").map((it) => esc(nombreArchRQ(q, it, formatoNumeralRQ(it, A.X) || "pdf"))).join(", ")}); estados financieros firmados; copia del libro mayor y balances; certificados de retención y certificados tributarios de las entidades financieras; certificado de existencia y representación legal.</p><br>
         <p>Atentamente,</p><br><br><p><b>${esc(rep?.nombre || "")}</b><br>${esc(rep?.cargo || "Representante legal")}<br>${esc(e.razon)} – NIT ${esc(e.nit)}<br>Dirección: CR 13 A 22 26 BRR ALCAZARES, Santa Marta · contabilidad@districlinicas.com</p>
         ${A.err ? `<p style="color:#b42318">Nota interna (borrar antes de enviar): no se pudieron calcular los totales de los anexos: ${esc(A.err)}</p>` : ""}
         </body></html>`;
@@ -10338,7 +10569,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
   }
 
   /* ---------- PDF del requerimiento */
-  async function subirPdfRQ(q, file) {
+  async function subirPdfRQ(q, file, silencio = false) {
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
       let bin = ""; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
@@ -10346,7 +10577,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       if (b64.length > 1000000) throw new Error("el PDF pesa más de 700 KB; guárdelo en la carpeta del requerimiento.");
       if (S.db) await S.db.doc(`requerimientosPdf/${q.numero}`).set({ numero: q.numero, nombre: file.name, d: b64 });
       q.pdf = true; q.pdfNombre = file.name; q._pdf = b64;
-      await guardarRQ(q); toast("PDF del requerimiento guardado."); render();
+      await guardarRQ(q); if (!silencio) { toast("PDF del requerimiento guardado."); render(); }
     } catch (err) { toast(`No se pudo guardar el PDF: ${err.message}`); }
   }
   async function bajarPdfRQ(q) {
@@ -10374,12 +10605,13 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
   }
   function vistaReq() {
     let html = "";
-    if (RQ.ocupado) html += `<div class="aviso info"><p><span class="girando" aria-hidden="true"></span>${esc(RQ.ocupado)}</p></div>`;
+    if (RQ.ocupado) html += `<div class="aviso info"><p><span class="girando" aria-hidden="true"></span><span id="rq-ocupado">${esc(RQ.ocupado)}</span></p></div>`;
     if (RQ.error) html += `<div class="aviso error"><p>${esc(RQ.error)}</p></div>`;
     const qs = [...RQ.docs.values()].sort((a, b) => (venceRQ(a) || "9").localeCompare(venceRQ(b) || "9") || b.numero.localeCompare(a.numero));
     html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start"><div><h2>Requerimientos de la DIAN</h2>
-      <p class="sub" style="margin:0">Registre cada requerimiento con sus numerales, lleve el control del plazo y de quién responde cada punto, y genere los anexos en Excel y el borrador de la carta con la información contable del año.</p></div>
-      <button class="btn primario" data-rq="nuevo">Nuevo requerimiento</button></div>
+      <p class="sub" style="margin:0">Cargue el PDF del requerimiento: la app lee el número, la fecha, el expediente, el año y cada numeral, y deja al lado de cada uno el botón para descargar el documento que hay que enviar.</p></div>
+      <button class="btn" data-rq="nuevo">Registrar a mano</button></div>
+      <div class="zona" id="zona-rq" tabindex="0" role="button" aria-label="Cargar el PDF del requerimiento" style="margin-top:12px"><b>Arrastre aquí el PDF del requerimiento o haga clic para buscarlo</b><span>Tal como llega de la DIAN, aunque sea escaneado (se lee con OCR). Puede cargar varios a la vez.</span></div>
       ${qs.length ? `<div class="tabla-env" style="margin-top:12px"><table class="lista"><thead><tr><th>Número</th><th>Impuesto y año</th><th>Fecha</th><th>Plazo</th><th>Avance</th><th></th></tr></thead><tbody>
         ${qs.map((q) => { const ok = q.items.filter((it) => it.estado === "listo" || it.estado === "noaplica").length; return `<tr${RQ.sel === q.numero ? ' style="background:var(--acento-suave)"' : ""}><td><b>${esc(q.numero)}</b><br><small>Exp. ${esc(q.expediente || "—")}</small></td><td>${esc(q.impuesto)}<br><small>Año gravable ${q.anio}</small></td><td>${esc(fechaC(q.fecha || ""))}</td><td>${chipVence(q)}</td><td>${ok} de ${q.items.length} numerales listos</td>
           <td class="num"><button class="btn chico" data-rq="abrir" data-id="${esc(q.numero)}">Abrir</button></td></tr>`; }).join("")}</tbody></table></div>` : ""}</section>`;
@@ -10411,13 +10643,17 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           ${q.pdf ? `<button class="btn" data-rq="pdf" data-id="${esc(q.numero)}">PDF recibido</button>` : `<button class="btn" data-rq="subir-pdf">Guardar el PDF recibido</button>`}</div></div>
       <div class="cq-filtros" style="margin-top:12px">${inp("fecha", "Fecha del requerimiento", "date")}${inp("notificado", "Fecha de notificación", "date")}${inp("plazo", "Plazo (días calendario)", "number")}${inp("expediente", "Expediente")}${inp("proyecto", "Funcionario que proyectó")}${inp("correo", "Correo de respuesta")}${inp("copia", "Con copia a")}${inp("radicado", "Radicado de la respuesta")}</div>
       <p class="pie"><b>Descargar todo (ZIP)</b> trae un archivo por numeral con el nombre que pide la DIAN, la carta de respuesta y una lista de lo que falta adjuntar (firmas, escaneos y certificados). Vence a los ${q.plazo || 15} días calendario de la notificación${venceRQ(q) ? `: <b>${esc(fechaLarga(venceRQ(q)))}</b>` : ""}. No responder a tiempo acarrea la sanción del artículo 651 del Estatuto Tributario.</p>
+      ${(q.avisos || []).length || q.leidoOCR ? `<div class="aviso ${(q.avisos || []).length ? "advertencia" : "info"}" style="margin-top:10px"><p>${q.leidoOCR ? "Datos leídos del PDF escaneado con OCR: revise número, fechas, correos y el texto de cada numeral. " : ""}${(q.avisos || []).map(esc).join(" ")}</p></div>` : ""}
+      ${q.textoLeido ? `<details class="conf" style="margin-top:8px"><summary>Texto leído del requerimiento</summary><div><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(q.textoLeido)}</pre></div></details>` : ""}
       <h3 style="margin:14px 0 6px">Información del año ${y} que usan los anexos</h3><ul class="hallazgos">${falta(tieneAn, `Balance por tercero ${y} (Años cerrados)`, "anual:cargar")}${falta(tieneLibro, `Libro auxiliar ${y} (para pasivos, compras y retenciones)`, "consulta:resumen")}${falta(Boolean(decl), `Declaración de renta ${y}${decl ? ` (formulario ${esc(decl.formulario)})` : ""}`, "renta")}</ul></section>
-      <section class="panel"><h2>Numerales</h2><div class="tabla-env"><table class="lista cq"><thead><tr><th>N.°</th><th>Solicitud</th><th>Anexo</th><th>Estado</th><th>Responsable</th><th>Notas</th></tr></thead><tbody>
-      ${q.items.map((it, i) => `<tr><td><b>${it.n}</b></td><td class="cq-conc" style="max-width:420px">${esc(textoItem(it, q))}</td>
-        <td>${esc(TIPO_RQ[it.tipo] || it.tipo)}${it.tipo === "otro" ? "<small>Documento por adjuntar</small>" : `<br><button class="btn chico" data-rq="archivo-n" data-id="${esc(q.numero)}" data-n="${it.n}" title="${esc(nombreArchRQ(q, it, it.tipo === "eeff" ? "pdf" : "xlsx"))}">Descargar ${it.tipo === "eeff" ? "PDF" : "Excel"}</button>${it.tipo === "eeff" ? ` <button class="btn chico" data-rq="eeff" data-anio="${y}">Ver</button>` : ""}`}</td>
-        <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select></td>
-        <td><input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" style="width:120px" aria-label="Responsable"></td>
-        <td><textarea data-rqi="${i}" data-k="notas" rows="2" style="min-width:200px" aria-label="Notas">${esc(it.notas || "")}</textarea></td></tr>`).join("")}
+      <section class="panel"><h2>Lo que pide la DIAN</h2><p class="sub">Cada numeral con el documento que lo responde. Descárguelo con el botón de la derecha; el estado pasa a «En proceso» y usted lo marca «Listo» cuando esté revisado.</p>
+      <div class="tabla-env"><table class="lista cq rq-tabla"><thead><tr><th>N.°</th><th>Solicitud de la DIAN</th><th>Estado y responsable</th><th class="num">Documento</th></tr></thead><tbody>
+      ${q.items.map((it, i) => { const fmtN = formatoNumeralRQ(it, null); const arch = fmtN ? nombreArchRQ(q, it, it.tipo === "cambio" ? "pdf" : fmtN) : ""; return `<tr><td><b>${it.n}</b></td>
+        <td class="cq-conc" style="max-width:520px">${esc(textoItem(it, q))}<small>${esc(TIPO_RQ[it.tipo] || it.tipo)}${it.tipo === "costos" ? ` · renglones <input type="text" data-rqi="${i}" data-k="renglones" value="${esc(it.renglones || "")}" style="width:120px;padding:1px 4px" aria-label="Renglones">` : ""}</small>
+          <textarea data-rqi="${i}" data-k="notas" rows="1" placeholder="Notas" style="width:100%;margin-top:4px" aria-label="Notas">${esc(it.notas || "")}</textarea></td>
+        <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select>
+          <input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" placeholder="Responsable" style="width:130px;margin-top:4px;display:block" aria-label="Responsable"></td>
+        <td class="num">${fmtN ? `<button class="btn primario chico" data-rq="archivo-n" data-id="${esc(q.numero)}" data-n="${it.n}">Descargar ${it.tipo === "eeff" || it.tipo === "mayor" ? "PDF" : it.tipo === "cambio" ? "" : "Excel"}</button><small>${esc(arch)}</small>` : `<small>Documento que adjunta usted</small>`}</td></tr>`; }).join("")}
       </tbody></table></div>
       <div class="fila" style="margin-top:12px;justify-content:space-between"><span class="pie" style="margin:0">Los anexos se arman con la contabilidad y se cuadran contra el renglón declarado; las diferencias quedan señaladas en cada hoja para explicarlas antes de enviar.</span>
         ${RQ.confirmar === q.numero ? `<span><button class="btn chico peligro" data-rq="borrar" data-id="${esc(q.numero)}">Eliminar</button> <button class="btn chico" data-rq="cancelar">No</button></span>` : `<button class="btn chico" data-rq="pedir-borrar" data-id="${esc(q.numero)}">Eliminar requerimiento</button>`}</div></section>`;
@@ -10444,6 +10680,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     return true;
   }
   function cambioReq(el) {
+    if (el.id === "archivo-rq-nuevo") { if (el.files.length) cargarPdfsRQ([...el.files]); el.value = ""; return true; }
     if (el.id === "archivo-rq") { const q = RQ.docs.get(RQ.sel); if (q && el.files[0]) subirPdfRQ(q, el.files[0]); el.value = ""; return true; }
     if (el.dataset.rqni !== undefined) { const it = RQ.nuevo.items[Number(el.dataset.rqni)]; it[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; return true; }
     if (el.dataset.rqn) { RQ.nuevo[el.dataset.rqn] = el.value; if (el.dataset.rqn === "fecha" && !RQ.nuevo.notificado) RQ.nuevo.notificado = el.value; if (el.type === "date") render(); return true; }
@@ -10502,9 +10739,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
 
   /* ------------------------------------------------------------ eventos */
   document.addEventListener("click", (ev) => {
-    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],[data-rq],#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
+    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],[data-rq],#zona-rq,#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
     if (!t) return;
     if ((t.id === "zona-rt" || t.dataset.rt) && clicRenta(t)) return;
+    if (t.id === "zona-rq") return $("#archivo-rq-nuevo").click();
     if (t.dataset.rq && clicReq(t)) return;
     if ((t.id === "zona-an" || t.dataset.an) && clicAnual(t)) return;
     if ((t.id === "zona-cq" || t.dataset.cq) && clicConsulta(t)) return;
@@ -10660,10 +10898,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     const sub = $("#vista .panel .sub"); if (sub) sub.textContent = "Hay cambios sin guardar.";
   }
   // Arrastrar y soltar
-  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
-  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt"); if (z) z.classList.remove("sobre"); });
-  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id === "zona-dn") return leerArchivosDian(fs); if (z.id === "zona-cq") return leerArchivosAux(fs); if (z.id === "zona-an") return leerArchivosAnual(fs); if (z.id === "zona-rt") return leerArchivosRenta(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
-  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-rt" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rt").click(); return; } if (ev.target.id === "zona-an" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-an").click(); return; } if (ev.target.id === "zona-cq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-cq").click(); return; } if (ev.target.id === "zona-dn" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-dn").click(); return; } if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
+  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
+  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq"); if (z) z.classList.remove("sobre"); });
+  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id === "zona-dn") return leerArchivosDian(fs); if (z.id === "zona-cq") return leerArchivosAux(fs); if (z.id === "zona-an") return leerArchivosAnual(fs); if (z.id === "zona-rt") return leerArchivosRenta(fs); if (z.id === "zona-rq") return cargarPdfsRQ(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
+  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-rq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rq-nuevo").click(); return; } if (ev.target.id === "zona-rt" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rt").click(); return; } if (ev.target.id === "zona-an" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-an").click(); return; } if (ev.target.id === "zona-cq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-cq").click(); return; } if (ev.target.id === "zona-dn" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-dn").click(); return; } if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
 
   /* ------------------------------------------------------------ base de datos */
   function estadoDB(texto, mal) { const e = $("#estado-db"); e.textContent = texto; e.classList.toggle("mal", Boolean(mal)); }
