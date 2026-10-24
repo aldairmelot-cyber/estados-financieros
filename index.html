@@ -10167,6 +10167,9 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
   }
   /* ---------- archivos para la DIAN: un archivo por numeral y un ZIP con todo */
   const ARCH_RQ = { eeff: "Estados_financieros", mayor: "Mayor_y_balances", balance: "Balance_prueba_por_tercero", pasivos: "R45_Pasivos", ingresos: "R58_Ingresos_brutos", devoluciones: "R59_Devoluciones_rebajas_descuentos", compras: "R39_Compras_inventario_y_juego_inventarios", costos: "Costos_y_gastos_por_renglon", retenciones: "R106_Otras_retenciones", certificados: "Entidades_financieras_certificados", cambio: "Diferencia_en_cambio", otro: "Anexo" };
+  const NOM_R = { 62: "Costos", 63: "Gastos_administracion", 64: "Gastos_distribucion_y_ventas", 65: "Gastos_financieros", 66: "Otros_gastos_y_deducciones" };
+  const renglonesRQ = (it) => String(it.renglones || "62, 63, 64, 65, 66").split(/[^\d]+/).map(Number).filter((n) => n >= 62 && n <= 66);
+  const nombreRenglonRQ = (q, it, r) => `N${String(it.n).padStart(2, "0")}_R${r}_${NOM_R[r]}_AG${q.anio}.xlsx`;
   const nombreArchRQ = (q, it, ext) => `N${String(it.n).padStart(2, "0")}_${ARCH_RQ[it.tipo] || "Anexo"}${it.tipo === "costos" ? "_R" + String(it.renglones || "").split(/[^\d]+/).filter(Boolean).join("_R") : ""}_AG${q.anio}.${ext}`;
   const cabRQ = (q, h) => { const e = S.cfg.empresa; return [[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero}${q.fecha ? ` del ${fechaC(q.fecha)}` : ""}${q.expediente ? ` · Expediente ${q.expediente}` : ""}`], [`Año gravable ${q.anio} · Numeral ${h.it.n}: ${h.titulo || ""}`], []]; };
   /** Libro de Excel con las hojas dadas (y el índice, si se pide). Devuelve los bytes. */
@@ -10224,6 +10227,20 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       await guardarArchivo(`Anexos_requerimiento_${q.numero}_AG${q.anio}.xlsx`, data);
       await avanceRQ(q, hojas.filter((h) => !h.error).map((h) => h.it.n));
     } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `No se pudieron generar los anexos: ${err.message}`; render(); }
+  }
+  /** Descarga el Excel de un solo renglón del numeral de costos y gastos. */
+  async function archivoRenglonRQ(q, n, r) {
+    const it = q.items.find((x) => x.n === n); if (!it) return;
+    try {
+      RQ.error = ""; RQ.ocupado = `Preparando el renglón ${r}…`; render();
+      await libreriasRQ(false);
+      const X = await datosRQ(q.anio, false);
+      const hs = GEN_RQ.costos(X, { ...it, renglones: String(r) }).map((h) => ({ ...h, it }));
+      const data = libroRQ(q, hs, false);
+      RQ.ocupado = ""; render();
+      await guardarArchivo(nombreRenglonRQ(q, it, r), data);
+      await avanceRQ(q, [n]);
+    } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `Renglón ${r}: ${err.message}`; render(); }
   }
   /** Descarga el archivo de un numeral: PDF de los estados financieros o Excel del anexo. */
   async function archivoNumeralRQ(q, n) {
@@ -10296,7 +10313,8 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           faltan.push(`${it.n}. ${nom("pdf")}: confirmar que no hubo operaciones en moneda extranjera, firmar y escanear.`);
           continue;
         }
-        if (hs.length) { add(nom("xlsx"), libroRQ(q, hs, false)); hechos.push(it.n); }
+        if (it.tipo === "costos" && hs.length) { for (const h of hs) add(nombreRenglonRQ(q, it, h.resumen.renglon), libroRQ(q, [h], false)); hechos.push(it.n); }
+        else if (hs.length) { add(nom("xlsx"), libroRQ(q, hs, false)); hechos.push(it.n); }
         if (it.tipo === "pasivos") faltan.push(`${it.n}. En ${nom("xlsx")}, completar las columnas «POR COMPLETAR» (objeto y soporte de los préstamos) y adjuntar los soportes.`);
         if (it.tipo === "costos" || it.tipo === "retenciones" || it.tipo === "pasivos") for (const h of hs) if (h.resumen?.dif != null && Math.abs(h.resumen.dif) >= 1000) faltan.push(`${it.n}. ${h.nombre}: explicar la diferencia de $ ${fmt(h.resumen.dif)} frente al renglón ${h.resumen.renglon || ""} declarado (conciliación fiscal, formato 2516).`);
         if (it.tipo === "retenciones") faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista.`);
@@ -10542,7 +10560,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           case "ingresos": t = `Se adjunta en Excel la relación de los ingresos brutos por tercero acumulados a 31 de diciembre de ${q.anio}, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 58.`; break;
           case "devoluciones": t = `Se adjunta en Excel la relación de las devoluciones, rebajas y descuentos en ventas por tercero, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 59.`; break;
           case "compras": { const j = hs[1]?.resumen?.texto || ""; t = `Se adjunta en Excel la relación de compras de inventarios por proveedor del 1 de enero al 31 de diciembre de ${q.anio}, por ${m(r.total)}, y el cálculo del costo de ventas por juego de inventarios. ${j}`; break; }
-          case "costos": t = `Se adjunta en Excel, en una hoja por renglón, la relación de los costos y gastos por concepto y tercero: ${hs.map((h) => `renglón ${h.resumen.renglon} ${m(h.resumen.neto)} (declarado ${m(h.resumen.declarado)})`).join("; ")}. En cada hoja se parte del valor contable y se muestra la conciliación con el valor declarado; la diferencia corresponde a [COMPLETAR: partidas no deducibles y ajustes fiscales, según la conciliación fiscal – formato 2516].`; break;
+          case "costos": t = `Se adjunta en Excel, en un archivo por cada renglón de la declaración, la relación de los costos y gastos por concepto y tercero: ${hs.map((h) => `renglón ${h.resumen.renglon} ${m(h.resumen.neto)} (declarado ${m(h.resumen.declarado)})`).join("; ")}. En cada hoja se parte del valor contable y se muestra la conciliación con el valor declarado; la diferencia corresponde a [COMPLETAR: partidas no deducibles y ajustes fiscales, según la conciliación fiscal – formato 2516].`; break;
           case "retenciones": t = `Se adjunta en Excel la relación de las otras retenciones por agente retenedor, con el concepto, la base y el valor retenido, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 106${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}, junto con los certificados de retención expedidos por los agentes retenedores.`; break;
           case "certificados": t = `Se adjuntan copias de los certificados tributarios anuales expedidos por las entidades financieras (${(r.texto || "").replace(/\.$/, "")}) que soportan lo deducido por intereses, comisiones, servicios y GMF.`; break;
           case "cambio": t = r.sinMovimiento ? `Durante el año gravable ${q.anio} la sociedad no realizó operaciones en moneda extranjera; por lo tanto, no registró diferencia en cambio realizada ni no realizada. Se adjunta la certificación firmada por el representante legal, el contador y el revisor fiscal.` : `Se adjunta el cuadro explicativo de la diferencia en cambio realizada y no realizada con sus auxiliares y soportes.`; break;
@@ -10558,7 +10576,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         Expediente: ${esc(q.expediente || "")}<br>Contribuyente: ${esc(e.razon)} – NIT ${esc(e.nit)}<br>${esc(q.impuesto)} – Año gravable ${q.anio}</p><br>
         <p>${esc(rep?.nombre || "")}, identificada con cédula de ciudadanía No. [COMPLETAR], en calidad de ${esc(rep?.cargo || "representante legal")} de ${esc(e.razon)}, sociedad identificada con NIT ${esc(e.nit)}, según el certificado de existencia y representación legal que se adjunta, y dentro del término señalado en el artículo 686 del Estatuto Tributario, doy respuesta al requerimiento de la referencia en el orden en que fue formulado:</p>
         ${parr}
-        <p><b>Anexos:</b> un archivo por numeral (${q.items.filter((it) => it.estado !== "noaplica" && it.tipo !== "otro").map((it) => esc(nombreArchRQ(q, it, formatoNumeralRQ(it, A.X) || "pdf"))).join(", ")}); estados financieros firmados; copia del libro mayor y balances; certificados de retención y certificados tributarios de las entidades financieras; certificado de existencia y representación legal.</p><br>
+        <p><b>Anexos:</b> un archivo por numeral (${q.items.filter((it) => it.estado !== "noaplica" && it.tipo !== "otro").map((it) => (it.tipo === "costos" ? renglonesRQ(it).map((r) => esc(nombreRenglonRQ(q, it, r))).join(", ") : esc(nombreArchRQ(q, it, formatoNumeralRQ(it, A.X) || "pdf")))).join(", ")}); estados financieros firmados; copia del libro mayor y balances; certificados de retención y certificados tributarios de las entidades financieras; certificado de existencia y representación legal.</p><br>
         <p>Atentamente,</p><br><br><p><b>${esc(rep?.nombre || "")}</b><br>${esc(rep?.cargo || "Representante legal")}<br>${esc(e.razon)} – NIT ${esc(e.nit)}<br>Dirección: CR 13 A 22 26 BRR ALCAZARES, Santa Marta · contabilidad@districlinicas.com</p>
         ${A.err ? `<p style="color:#b42318">Nota interna (borrar antes de enviar): no se pudieron calcular los totales de los anexos: ${esc(A.err)}</p>` : ""}
         </body></html>`;
@@ -10653,7 +10671,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           <textarea data-rqi="${i}" data-k="notas" rows="1" placeholder="Notas" style="width:100%;margin-top:4px" aria-label="Notas">${esc(it.notas || "")}</textarea></td>
         <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select>
           <input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" placeholder="Responsable" style="width:130px;margin-top:4px;display:block" aria-label="Responsable"></td>
-        <td class="num">${fmtN ? `<button class="btn primario chico" data-rq="archivo-n" data-id="${esc(q.numero)}" data-n="${it.n}">Descargar ${it.tipo === "eeff" || it.tipo === "mayor" ? "PDF" : it.tipo === "cambio" ? "" : "Excel"}</button><small>${esc(arch)}</small>` : `<small>Documento que adjunta usted</small>`}</td></tr>`; }).join("")}
+        <td class="num">${it.tipo === "costos" ? renglonesRQ(it).map((r) => `<button class="btn primario chico" style="margin:0 0 4px" data-rq="archivo-r" data-id="${esc(q.numero)}" data-n="${it.n}" data-r="${r}" title="${esc(nombreRenglonRQ(q, it, r))}">Renglón ${r} · ${esc(R110[r].split(" ").slice(0, 3).join(" "))}</button>`).join("<br>") + `<small>Un Excel por renglón, como lo pide la DIAN</small>` : fmtN ? `<button class="btn primario chico" data-rq="archivo-n" data-id="${esc(q.numero)}" data-n="${it.n}">Descargar ${it.tipo === "eeff" || it.tipo === "mayor" ? "PDF" : it.tipo === "cambio" ? "" : "Excel"}</button><small>${esc(arch)}</small>` : `<small>Documento que adjunta usted</small>`}</td></tr>`; }).join("")}
       </tbody></table></div>
       <div class="fila" style="margin-top:12px;justify-content:space-between"><span class="pie" style="margin:0">Los anexos se arman con la contabilidad y se cuadran contra el renglón declarado; las diferencias quedan señaladas en cada hoja para explicarlas antes de enviar.</span>
         ${RQ.confirmar === q.numero ? `<span><button class="btn chico peligro" data-rq="borrar" data-id="${esc(q.numero)}">Eliminar</button> <button class="btn chico" data-rq="cancelar">No</button></span>` : `<button class="btn chico" data-rq="pedir-borrar" data-id="${esc(q.numero)}">Eliminar requerimiento</button>`}</div></section>`;
@@ -10669,6 +10687,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     else if (a === "abrir") { RQ.sel = t.dataset.id; RQ.nuevo = null; RQ.error = ""; render(); }
     else if (a === "excel" && q) excelRQ(q);
     else if (a === "archivo-n" && q) archivoNumeralRQ(q, Number(t.dataset.n));
+    else if (a === "archivo-r" && q) archivoRenglonRQ(q, Number(t.dataset.n), Number(t.dataset.r));
     else if (a === "zip" && q) zipRQ(q);
     else if (a === "carta" && q) cartaRQ(q);
     else if (a === "pdf" && q) bajarPdfRQ(q);
