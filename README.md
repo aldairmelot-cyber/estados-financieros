@@ -6,9 +6,18 @@ Aplicación web para generar, a partir del Libro de Inventario / Balance de prue
 
 En **Verificación DIAN → Resumen y carga de archivos** se sueltan juntos el reporte de documentos electrónicos de la DIAN (Excel, emitidos y recibidos) y el **Libro Auxiliar por Nit** de MantisWeb del mismo período. La app verifica que cada factura de venta, nota, documento soporte y factura de proveedor esté registrada con el mismo valor, IVA, tercero y mes; lista lo que falta por registrar y lo que está en el software sin soporte en la DIAN, y exporta todo a Excel. El primer cruce puede ser acumulado (enero a septiembre); luego se hace mes a mes y los pendientes se arrastran solos. El libro se procesa en el navegador; en la base de datos solo se guardan el resumen y las novedades.
 
-## Balances de años cerrados
+## Años cerrados (2023 y 2024)
 
-En **Datos → Cargar archivos** también se puede cargar el balance por tercero (**FunBalanceTotalNit**, Libro de Inventario por Nit) de un año completo, del 1 de enero al 31 de diciembre. Si ese mes todavía no tiene balance en el histórico, se guardan los totales de cada cuenta como balance del período (para ESF, ERI, ECP, EFE, indicadores y notas) y el detalle por tercero para Cartera y proveedores. Si el mes ya tiene su balance con centros de costo, el archivo solo alimenta la cartera, como antes. Este archivo no trae centros de costo, así que los informes por sede de esos períodos quedan sin datos.
+Los años que no están mensualizados van **aparte del histórico mensual**, en el menú **Años cerrados**. Se carga el balance por tercero (**FunBalanceTotalNit**, Libro de Inventario por Nit) del 1 de enero al 31 de diciembre; también se puede soltar en Datos → Cargar archivos, y la app lo envía allí. Cada año guarda:
+
+- el balance por cuenta, con el que se arman situación financiera, resultados (comparado con el año anterior si está cargado), cambios en el patrimonio, flujos de efectivo, indicadores y notas, con descarga en PDF y Excel;
+- el **detalle por tercero de todas las cuentas** (saldo inicial, débitos, créditos y saldo final, con dirección, teléfono, correo y ciudad), en **Saldos por tercero (DIAN)**: filtros por cuentas y tercero, accesos rápidos (ingresos, costos y gastos, cartera, proveedores, retenciones, IVA), NIT con dígito de verificación, control de cuentas cuyo detalle no da el total y exportación a Excel.
+
+Se guarda en las colecciones `anuales` y `anualesPartes`. No toca el histórico mensual (`meses`) ni la cartera mensual (`terceros`).
+
+## Declaraciones de renta
+
+En **Impuestos → Declaraciones de renta presentadas (110)** se cargan los PDF del formulario 110 que descarga la DIAN. La app lee todos los renglones, verifica la lectura con la aritmética del propio formulario y guarda también el PDF original (colecciones `renta` y `rentaPdf`). Muestra los años lado a lado, el cruce de cada declaración con la contabilidad del año y exporta a Excel. Si hay corrección, queda vigente la de fecha más reciente. La proyección de renta toma automáticamente los valores de la declaración del año anterior.
 
 ## Consulta del libro auxiliar
 
