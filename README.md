@@ -15,6 +15,23 @@ Los años que no están mensualizados van **aparte del histórico mensual**, en 
 
 Se guarda en las colecciones `anuales` y `anualesPartes`. No toca el histórico mensual (`meses`) ni la cartera mensual (`terceros`).
 
+## Requerimientos DIAN
+
+En **Requerimientos DIAN** se registra cada requerimiento (número, fecha, expediente, año, fecha de notificación y plazo) con sus numerales, a partir del modelo de requerimiento ordinario de renta. Para cada numeral se lleva el estado, el responsable y notas, y se guarda el PDF recibido (colecciones `requerimientos` y `requerimientosPdf`).
+
+Con el balance por tercero del año (Años cerrados), el libro auxiliar (Consulta de movimientos) y la declaración de renta, la app genera los anexos en Excel, una hoja por numeral, cada una cuadrada contra el renglón declarado:
+
+- balance de prueba por tercero y mayor y balances;
+- pasivos (R45) con fecha de inicio, aumentos, abonos y saldo;
+- ingresos brutos (R58) y devoluciones (R59) por tercero;
+- compras de inventario por proveedor y juego de inventarios;
+- costos y gastos (R62 a R66) por concepto y tercero, con el 50 % del GMF y las provisiones presentadas en el renglón 66;
+- otras retenciones (R106) por agente retenedor con base y valor;
+- entidades financieras a las que hay que pedir el certificado tributario;
+- diferencia en cambio.
+
+También genera el borrador de la carta de respuesta en Word, con marcas [COMPLETAR] en lo que debe revisar el contador.
+
 ## Declaraciones de renta
 
 En **Impuestos → Declaraciones de renta presentadas (110)** se cargan los PDF del formulario 110 que descarga la DIAN. La app lee todos los renglones, verifica la lectura con la aritmética del propio formulario y guarda también el PDF original (colecciones `renta` y `rentaPdf`). Muestra los años lado a lado, el cruce de cada declaración con la contabilidad del año y exporta a Excel. Si hay corrección, queda vigente la de fecha más reciente. La proyección de renta toma automáticamente los valores de la declaración del año anterior.

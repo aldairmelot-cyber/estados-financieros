@@ -440,6 +440,7 @@ table.cq small.neg, .lista small.neg { color: var(--error); display: block; }
 <input type="file" id="archivo-cq" accept=".xlsx,.xlsm" multiple hidden>
 <input type="file" id="archivo-an" accept=".xls,.xlsx" multiple hidden>
 <input type="file" id="archivo-rt" accept=".pdf" multiple hidden>
+<input type="file" id="archivo-rq" accept=".pdf" hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -4166,7 +4167,7 @@ const VerifDian = (() => {
     db: null, dbListo: false, cargando: true, confirmar: null, sedeVista: "mes", borrador: null, sucio: false,
   };
   const TABS = [["inicio", "Panel"], ["cargar", "Cargar archivo"], ["revision", "Revisión"], ["esf", "Situación financiera"], ["eri", "Resultados"],
-    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["dian", "Verificación DIAN"], ["consulta", "Consulta del libro auxiliar"], ["anual", "Años cerrados"], ["renta", "Declaraciones de renta"], ["config", "Configuración"]];
+    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["dian", "Verificación DIAN"], ["consulta", "Consulta del libro auxiliar"], ["anual", "Años cerrados"], ["renta", "Declaraciones de renta"], ["req", "Requerimientos DIAN"], ["config", "Configuración"]];
 
   const ICO = {
     inicio: '<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/>',
@@ -4176,6 +4177,7 @@ const VerifDian = (() => {
     cartera: '<path d="M3 7h18v12H3z"/><path d="M3 11h18M16 15h2"/>',
     datos: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
     dian: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+    req: '<path d="M4 5h16v11H8l-4 4z"/><path d="M12 8v4M12 14.5v.5"/>',
     anual: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M7.5 14h4M7.5 17h7"/>',
     consulta: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2M8.5 11h5M11 8.5v5"/>',
     bancos: '<path d="M3 10h18L12 4z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
@@ -4189,6 +4191,7 @@ const VerifDian = (() => {
     { g: "Consulta de movimientos", ico: "consulta", items: [["consulta:resumen", "Libros auxiliares cargados"], ["consulta:movs", "Movimientos por cuenta"], ["consulta:comp", "Comprobantes"], ["consulta:cuadre", "Cuadre con el balance"]] },
     { g: "Gestión", ico: "gestion", items: [["sede:lineal", "Resultados por sede mes a mes"], ["sede:mes", "Resultados por sede · mes"], ["sede:acum", "Resultados por sede · año"]] },
     { g: "Impuestos", ico: "impuestos", items: [["impuestos:ret", "Retención en la fuente (350)"], ["impuestos:iva", "IVA (300)"], ["impuestos:ica", "Industria y comercio (ICA)"], ["impuestos:res:anio", "Resumen del año"], ["impuestos:res:conc", "Conciliación de ingresos"], ["impuestos:res:comp", "Ajustes próxima declaración"], ["impuestos:res:renta", "Proyección de renta"], ["renta", "Declaraciones de renta presentadas (110)"]] },
+    { g: "Requerimientos DIAN", ico: "req", items: [["req", "Requerimientos y respuestas"]] },
     { g: "Verificación DIAN", ico: "dian", items: [["dian:resumen", "Resumen y carga de archivos"], ["dian:pendientes", "Por registrar en el software"], ["dian:diferencias", "Diferencias de valor e IVA"], ["dian:libros", "En el software sin la DIAN"], ["dian:detalle", "Consultar documentos"]] },
     { g: "Tesorería", ico: "bancos", items: [["bancos:resumen", "Conciliaciones bancarias"], ["bancos:cargar", "Cargar libro y extracto"], ["bancos:config", "Parámetros de conciliación"]] },
     { g: "Cartera y proveedores", ico: "cartera", items: [["terceros:cxc", "Cuentas por cobrar"], ["terceros:cxp", "Cuentas por pagar"], ["prov", "Proveedores por pagar (vencimientos)"]] },
@@ -6320,7 +6323,7 @@ const VerifDian = (() => {
     if (S.cargando) { v.innerHTML = '<section class="panel"><p class="vacio">Cargando el histórico…</p></section>'; return; }
     let D = null;
     try { D = calcular(); } catch (err) { console.error(err); }
-    const vistas = { dian: () => vistaDian(), consulta: () => vistaConsulta(), anual: () => vistaAnual(), renta: () => vistaRenta(), prov: () => vistaProveedores(), bancos: () => vistaBancos(), inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
+    const vistas = { dian: () => vistaDian(), consulta: () => vistaConsulta(), anual: () => vistaAnual(), renta: () => vistaRenta(), req: () => vistaReq(), prov: () => vistaProveedores(), bancos: () => vistaBancos(), inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
     try { v.innerHTML = (vistas[S.tab] || vistaInicio)(D); } catch (err) {
       console.error(err);
       v.innerHTML = `<div class="aviso error"><p>No se pudo mostrar esta sección: ${esc(err.message)}</p></div>`;
@@ -6645,7 +6648,7 @@ const VerifDian = (() => {
       ws["!cols"] = m.cols.map((c, i) => ({ wch: i === 0 ? 52 : c.tipo === "txt2" ? 70 : c.tipo === "nota" ? 7 : 20 }));
       XLSX.utils.book_append_sheet(wb, ws, m.hoja.slice(0, 31));
     }
-    if (soloModelos) return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    if (soloModelos) return XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true });
     // Dictamen
     const aoaD = [[e.razon], ["INFORME DEL REVISOR FISCAL" + (aprobadoDictamen(S.periodo) ? "" : " (BORRADOR)")], [], ["A los señores accionistas de " + e.razon], []];
     for (const sx of dictamenSecciones(D)) { aoaD.push([sx.titulo.toUpperCase()]); sx.parrafos.forEach((t) => aoaD.push([t])); aoaD.push([]); }
@@ -6678,7 +6681,7 @@ const VerifDian = (() => {
     wsV["!cols"] = [{ wch: 5 }, { wch: 36 }, { wch: 12 }, { wch: 110 }];
     XLSX.utils.book_append_sheet(wb, wsV, "Validaciones");
     if (Array.isArray(wb.SheetNames) && wb.SheetNames.includes("Dictamen")) wb.SheetNames = [...wb.SheetNames.filter((n) => n !== "Dictamen"), "Dictamen"]; // el dictamen va de último
-    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    return XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true });
   }
   async function exportar(tipo) {
     const D = calcular();
@@ -7412,7 +7415,7 @@ const VerifDian = (() => {
         for (const c of lista) { const s = c.saldos || {}; aoa.push([c.cuenta, c.nombre, c.banco, c.numero, s.libros, s.banco, s.transito, s.egresos, s.nc, s.nd, s.diferencia]); }
         const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = [{ wch: 11 }, { wch: 36 }, { wch: 16 }, { wch: 14 }, ...Array(7).fill({ wch: 16 })];
         XLSX.utils.book_append_sheet(wb, ws, "Resumen");
-        data = XLSX.write(wb, { type: "array", bookType: "xlsx" }); nombre = `Conciliaciones_${BC.periodo}.xlsx`;
+        data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true }); nombre = `Conciliaciones_${BC.periodo}.xlsx`;
       } else {
         const z = resueltoActual(); if (!z) return;
         const { c, R, CB } = z, s = R.saldos, P = R.pendientes;
@@ -7447,7 +7450,7 @@ const VerifDian = (() => {
           if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
           const wb = XLSX.utils.book_new();
           const hoja = (nom, aoa, cols) => { const ws = XLSX.utils.aoa_to_sheet(aoa); if (cols) ws["!cols"] = cols.map((w) => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, nom); };
-          if (tipo === "comprobante") { hoja("Comprobante", compAoa, [11, 11, 32, 12, 22, 8, 60, 14, 14, 14, 16]); data = XLSX.write(wb, { type: "array", bookType: "xlsx" }); nombre = `Comprobante_${c.cuenta}_${c.periodo}.xlsx`; }
+          if (tipo === "comprobante") { hoja("Comprobante", compAoa, [11, 11, 32, 12, 22, 8, 60, 14, 14, 14, 16]); data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true }); nombre = `Comprobante_${c.cuenta}_${c.periodo}.xlsx`; }
           else {
             hoja("Conciliación", [[S.cfg.empresa.razon], [`Conciliación bancaria ${c.cuenta} ${c.nombre} · ${c.banco} N.º ${c.numero}`], [`Al ${fechaLarga(Bancos.finDeMes(c.periodo))}`], [], ...formato], [60, 18]);
             const pend = (t, arr) => [[t], ["Fecha", "Documento", "NIT", "Detalle", "Tipo", "Valor"], ...arr.map((x) => [x.fecha, x.lado === "L" ? x.doc : x.doc || "", x.nit || "", x.lado === "B" ? x.desc : `${x.concepto} · ${x.tercero}`, x.lado === "B" ? Bancos.NOMBRE_CAT[x.cat] : "", x.valor]), []];
@@ -7464,7 +7467,7 @@ const VerifDian = (() => {
             }
             hoja("Libro", [["Fecha", "Documento", "NIT", "Tercero", "Concepto", "Débito", "Crédito", "Cruce"], ...R.L.filter((y) => !y.ant).map((y) => [y.fecha, y.doc, y.nit, y.tercero, y.concepto, y.valor > 0 ? y.valor : 0, y.valor < 0 ? -y.valor : 0, y.par || "Pendiente"])], [11, 14, 12, 22, 40, 14, 14, 9]);
             hoja("Extracto", [["Fecha", "Descripción", "Documento", "Tipo", "Valor", "Cruce"], ...R.B.filter((y) => !y.ant).map((y) => [y.fecha, y.desc, y.doc, Bancos.NOMBRE_CAT[y.cat], y.valor, y.par || "Pendiente"])], [11, 60, 12, 34, 14, 9]);
-            data = XLSX.write(wb, { type: "array", bookType: "xlsx" }); nombre = base + ".xlsx";
+            data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true }); nombre = base + ".xlsx";
           }
         }
       }
@@ -7912,7 +7915,7 @@ const VerifDian = (() => {
         hoja("Por proveedor", [["NIT", "Proveedor", "Prioridad", "Saldo", "Vencido", ...Proveedores.RANGOS, "Seleccionado para pagar", "Observación"], ...todos.map((p) => [p.nit, p.nombre, PRIO[p.prioridad][0], p.saldo, p.vencido, ...p.b, T.porProv[p.nit]?.valor || "", acuerdos[p.nit]?.nota || ""])], [12, 40, 22, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 30]);
         hoja("Facturas", [["NIT", "Proveedor", "Factura", "Fecha", "Plazo", "Vence", "Días vencida", "Saldo", "Rango", "Pagar", "Abono", "Valor a pagar"], ...todos.flatMap((p) => p.facturas.map((x) => { const s = acuerdos[p.nit]?.f?.[x.k] || {}; return [p.nit, p.nombre, x.factura, x.fecha, x.plazo, x.vence, x.dias, x.saldo, Proveedores.RANGOS[x.rango], s.p ? "Sí" : "", Number(s.a) > 0 ? Number(s.a) : "", valorPago(x, s) || ""]; }))], [12, 36, 14, 11, 6, 11, 8, 14, 16, 6, 14, 14]);
         if (A.creditos.length) hoja("Notas crédito", [["Proveedor", "Documento", "Fecha", "Valor"], ...A.creditos.map((x) => [x.nombre, x.factura, x.fecha, x.saldo])], [40, 14, 11, 14]);
-        data = XLSX.write(wb, { type: "array", bookType: "xlsx" }); nombre = base + ".xlsx";
+        data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true }); nombre = base + ".xlsx";
       }
     } catch (err) { console.error(err); toast(`No se pudo generar el archivo: ${err.message}`); return; }
     return guardarArchivo(nombre, data);
@@ -8343,7 +8346,7 @@ const VerifDian = (() => {
       hoja("Ventas sin DIAN", [...encab("Ventas en el software que no están en la DIAN"), ["Comprobante", "Fecha", "NIT", "Cliente", "Ingreso", "IVA", "Total", "Concepto"], ...(X.libroVentas || []).map((r) => [r.num, r.f, r.nit, r.nom, r.ing, r.iva, r.tot, r.conc])], [15, 11, 13, 36, 14, 12, 14, 50]);
       hoja("Compras sin DIAN", [...encab("Compras y gastos con IVA o cuenta por pagar sin factura electrónica en la DIAN"), ["Comprobante", "Fecha", "NIT", "Tercero", "Factura citada", "Base", "IVA", "Concepto", "Observación"], ...(X.libroCompras || []).map((r) => [r.num, r.f, r.nit, r.nom, r.fac, r.base, r.iva, r.conc, r.dupAnt ? "Factura ya registrada en un período anterior" : ""])], [15, 11, 13, 36, 22, 14, 12, 50, 30]);
       if (X.completo) hoja("Todos los documentos", [...encab("Todos los documentos de la DIAN y su registro"), cab, ...X.filas.map(filaX)], anchos);
-      const data = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      const data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true });
       await guardarArchivo(`Verificacion_DIAN_${X.id}.xlsx`, data);
     } catch (err) { toast(`No se pudo generar el Excel: ${err.message}`); }
   }
@@ -9209,7 +9212,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         if (Q.desc.length) hoja("Descuadrados", [["Fecha", "Tipo", "Comprobante", "Débitos", "Créditos", "Diferencia"], ...Q.desc.map((c) => [c.fecha, c.tipo, c.comp, c.d, c.c, Math.round((c.d - c.c) * 100) / 100])], [11, 6, 15, 15, 15, 12]);
         nombre = `Cuadre_libro_auxiliar_${Y}.xlsx`;
       }
-      const data = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      const data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true });
       CQ.ocupado = ""; render();
       await guardarArchivo(nombre, data);
     } catch (err) { CQ.ocupado = ""; render(); toast(`No se pudo generar el Excel: ${err.message}`); }
@@ -9567,7 +9570,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           wc["!cols"] = [11, 36, 16, 16, 16, 16, 16].map((w) => ({ wch: w }));
           XLSX.utils.book_append_sheet(wb, wc, "Control");
         }
-        data = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+        data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true });
         nombre = `Terceros_${Y}${X.prefs.length ? "_" + X.prefs.join("-") : ""}.xlsx`;
       } else {
         const D = calcularAnual(Y); if (!D) return;
@@ -9865,7 +9868,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         wc["!cols"] = [8, 50, 22, 16, 16, 16].map((w) => ({ wch: w }));
         XLSX.utils.book_append_sheet(wb, wc, `Cruce ${a}`);
       }
-      await guardarArchivo("Declaraciones_renta_110.xlsx", XLSX.write(wb, { type: "array", bookType: "xlsx" }));
+      await guardarArchivo("Declaraciones_renta_110.xlsx", XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true }));
     } catch (err) { toast(`No se pudo generar el Excel: ${err.message}`); }
   }
   function clicRenta(t) {
@@ -9882,6 +9885,482 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (el.id === "archivo-rt") { if (el.files.length) leerArchivosRenta([...el.files]); el.value = ""; return true; }
     if (el.id === "rt-cruce") { RT.anioCruce = Number(el.value); render(); return true; }
     if (el.dataset.rtf === "todos") { RT.verTodos = el.checked; render(); return true; }
+    return false;
+  }
+
+  /* ------------------------------------------------------------ requerimientos de la DIAN
+     Seguimiento de cada requerimiento (plazo, numerales, responsable, estado) y generación de los anexos en Excel
+     a partir del balance por tercero del año (Años cerrados), el libro auxiliar (Consulta) y la declaración de renta.
+     Colecciones: requerimientos (datos y numerales) y requerimientosPdf (el PDF recibido). */
+  const RQ = { docs: new Map(), sel: null, nuevo: null, ocupado: "", error: "", confirmar: null, h: null };
+  S.rq = RQ;
+  const MODELO_RQ = [
+    ["eeff", "Estados financieros firmados por representante legal y revisor fiscal y/o contador."],
+    ["mayor", "Copia escaneada del libro mayor y balances a diciembre 31 de {anio}."],
+    ["balance", "Balance de prueba a 8 dígitos por tercero exportado en formato Excel."],
+    ["pasivos", "Renglón 45: relación detallada de cada uno de los conceptos del valor total de los pasivos: nombre o razón social, NIT o cédula, valor, fecha de inicio de la obligación, abonos, saldo final, soporte de la forma como se recibió el ingreso y objeto del pasivo (para préstamos de dinero). En Excel."],
+    ["ingresos", "Relación detallada de los ingresos brutos (renglón 58) acumulada anualmente por tercero: NIT, nombre o razón social y valor acumulado a 31 de diciembre de {anio}. En Excel."],
+    ["devoluciones", "Relación detallada de las devoluciones, rebajas y descuentos en ventas (renglón 59) acumulada anualmente por tercero: NIT, nombre o razón social y valor acumulado a 31 de diciembre de {anio}. En Excel."],
+    ["compras", "Relación detallada de compras de inventarios (renglón 39) de enero 1 a diciembre 31 de {anio} por tercero: NIT, nombre o razón social, valor acumulado, inventario inicial e inventario final y cálculo del costo de venta por juego de inventarios."],
+    ["costos", "Renglones {renglones}: relación detallada de cada uno de los conceptos del valor total de los costos, gastos de administración, gastos de distribución y ventas, gastos financieros y otros gastos y deducciones de la declaración de renta {anio}: NIT, nombre o razón social, concepto y valor. En Excel, cada renglón por separado.", "62, 63, 64, 65, 66"],
+    ["retenciones", "Renglón 106: relación detallada en Excel de cada uno de los conceptos del valor total de las otras retenciones de la declaración de renta {anio}: NIT, nombre o razón social, concepto, base y valor retenido, y los certificados respectivos."],
+    ["certificados", "Copia escaneada legible de los certificados anuales tributarios de todas las entidades financieras que soporten lo deducido por intereses, comisiones, servicios, GMF, etc."],
+    ["cambio", "En caso de tener diferencia en cambio: cuadro explicativo de la diferencia en cambio realizada y no realizada del año {anio}, auxiliares y soportes, en Excel."],
+  ];
+  const TIPO_RQ = { eeff: "Estados financieros", mayor: "Libro mayor y balances", balance: "Balance por tercero", pasivos: "Pasivos (R45)", ingresos: "Ingresos brutos (R58)", devoluciones: "Devoluciones (R59)", compras: "Compras de inventarios (R39)", costos: "Costos y gastos (R62 a R66)", retenciones: "Otras retenciones (R106)", certificados: "Certificados financieros", cambio: "Diferencia en cambio", otro: "Otro (manual)" };
+  const ESTADOS_RQ = [["pendiente", "Pendiente"], ["proceso", "En proceso"], ["listo", "Listo"], ["noaplica", "No aplica"]];
+  const sumarDias = (iso, n) => { if (!iso) return ""; const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const diasEntre = (a, b) => Math.round((Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z")) / 86400000);
+  const venceRQ = (q) => (q.notificado ? sumarDias(q.notificado, Number(q.plazo || 15)) : "");
+  const textoItem = (it, q) => String(it.texto || "").replace(/\{anio\}/g, q.anio).replace(/\{renglones\}/g, it.renglones || "");
+
+  async function guardarRQ(q) {
+    q.actualizado = new Date().toISOString();
+    RQ.docs.set(q.numero, q);
+    if (S.db) { try { await S.db.doc(`requerimientos/${q.numero}`).set(clon(q)); } catch (err) { toast(`No se pudo guardar: ${err.message || err.code}`); } }
+  }
+  function nuevoRQ() {
+    RQ.nuevo = { numero: "", fecha: "", expediente: "", impuesto: "Impuesto sobre la renta y complementarios", anio: new Date().getFullYear() - 2, notificado: "", plazo: 15, proyecto: "", correo: "corresp_entrada_santamarta@dian.gov.co", copia: "",
+      items: MODELO_RQ.map(([tipo, texto, renglones]) => ({ incluir: true, tipo, texto, renglones: renglones || "" })) };
+  }
+  async function crearRQ() {
+    const f = RQ.nuevo;
+    const numero = String(f.numero || "").replace(/\D/g, "");
+    if (!numero) { RQ.error = "Escriba el número del requerimiento."; return render(); }
+    if (!Number(f.anio)) { RQ.error = "Escriba el año gravable."; return render(); }
+    if (RQ.docs.has(numero)) { RQ.error = `El requerimiento ${numero} ya existe.`; return render(); }
+    const items = f.items.filter((x) => x.incluir).map((x, i) => ({ n: i + 1, tipo: x.tipo, texto: x.texto, renglones: x.renglones || "", estado: "pendiente", resp: "", notas: "" }));
+    const q = { numero, fecha: f.fecha, expediente: f.expediente, impuesto: f.impuesto, anio: Number(f.anio), notificado: f.notificado || f.fecha, plazo: Number(f.plazo || 15), proyecto: f.proyecto, correo: f.correo, copia: f.copia, items, creado: new Date().toISOString(), pdf: false };
+    RQ.error = ""; RQ.nuevo = null; RQ.sel = numero;
+    await guardarRQ(q);
+    toast(`Requerimiento ${numero} creado con ${items.length} numerales.`);
+    render();
+  }
+
+  /* ---------- datos del año para los anexos */
+  async function esperarDato(fn, msg) {
+    for (let i = 0; i < 3000; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 100)); }
+    throw new Error(msg);
+  }
+  async function datosRQ(y, conLibro) {
+    const an = AN.docs.get(y);
+    if (!an) throw new Error(`Falta el balance por tercero de ${y}: cárguelo en Años cerrados.`);
+    AN.error = "";
+    const det = await esperarDato(() => { if (AN.error) throw new Error(AN.error); return detAnual(y); }, "No se pudo descargar el detalle por tercero.");
+    let libro = null;
+    if (conLibro && unidadesCQ(y).length) { CQ.error = ""; libro = await esperarDato(() => { if (CQ.error) throw new Error(CQ.error); return datosAnioCQ(y); }, "No se pudo descargar el libro auxiliar."); }
+    const b = an.b, hijos = new Map();
+    for (const cod of b.codigos) { const p = b.filas.get(cod).padre; if (p) { if (!hijos.has(p)) hijos.set(p, []); hijos.get(p).push(cod); } }
+    const propio = (cod, k) => { const f = b.filas.get(cod); if (!f) return 0; let v = f[k]; for (const h of hijos.get(cod) || []) v -= b.filas.get(h)[k]; return v; };
+    const porCuenta = new Map();
+    for (const r of det.rows) { if (!porCuenta.has(r[0])) porCuenta.set(r[0], []); porCuenta.get(r[0]).push(r); }
+    const decl = rentaVigente(y);
+    return { y, b, det, libro, decl, propio, porCuenta, R: (n) => (decl ? decl.R[n] ?? null : null), nom: (n) => det.dir[n]?.[0] || "", cta: (c) => b.filas.get(c)?.nombre || "", val: (p, k = "ns") => Motor.valor(b, p, k) };
+  }
+  /** Valores por cuenta y tercero; lo que la cuenta tiene sin tercero va en un renglón aparte. valor(sa, d, c, ns). */
+  function relacionRQ(X, incluye, valor) {
+    const out = [];
+    for (const cod of X.b.codigos) {
+      if (!incluye(cod)) continue;
+      const rs = X.porCuenta.get(cod) || [];
+      const t = [0, 0, 0, 0];
+      for (const r of rs) { t[0] += r[2]; t[1] += r[3]; t[2] += r[4]; t[3] += r[5]; const v = valor(r[2], r[3], r[4], r[5]); if (Math.abs(v) >= 0.005) out.push({ cod, nit: r[1], v, sa: r[2], d: r[3], c: r[4], ns: r[5] }); }
+      const own = ["sa", "d", "c", "ns"].map((k) => X.propio(cod, k));
+      const resto = own.map((v, i) => v - t[i]);
+      const v = valor(...resto);
+      if (Math.abs(v) >= 0.5) out.push({ cod, nit: "", v, sa: resto[0], d: resto[1], c: resto[2], ns: resto[3], sinTercero: true });
+    }
+    return out;
+  }
+  const pref = (ps, excl = []) => (c) => ps.some((p) => c.startsWith(p)) && !excl.some((p) => c.startsWith(p));
+  const nitDV = (n) => (n ? `${n}${dvNit(n) ? "-" + dvNit(n) : ""}` : "");
+  /** Cierre de cada anexo: total relacionado, ajustes, valor declarado y diferencia. */
+  function cierreRQ(aoa, total, ajustes, X, renglon, colValor) {
+    const fila = (t, v) => { const r = Array(colValor + 1).fill(""); r[colValor - 1] = t; r[colValor] = v == null ? null : r2a(v); return r; };
+    aoa.push([]);
+    aoa.push(fila("Total relacionado (contabilidad)", total));
+    let neto = total;
+    for (const [t, v] of ajustes) { aoa.push(fila(t, v)); neto += v; }
+    if (renglon) {
+      const dec = X.R(renglon);
+      if (ajustes.length) aoa.push(fila("Total después de ajustes", neto));
+      aoa.push(fila(`Valor declarado renglón ${renglon}`, dec));
+      if (dec != null) aoa.push(fila(Math.abs(dec - neto) < 1000 ? "Diferencia (redondeo de la declaración a miles)" : "Diferencia por explicar (complete con la conciliación fiscal, formato 2516)", dec - neto));
+      return { total, neto, declarado: dec, dif: dec == null ? null : dec - neto };
+    }
+    return { total, neto };
+  }
+
+  /* ---------- generadores de anexos. Cada uno devuelve hojas: { nombre, titulo, aoa, anchos, resumen } */
+  const GEN_RQ = {
+    balance(X) {
+      const aoa = [["Cuenta", "Nombre de la cuenta", "NIT", "DV", "Nombre del tercero", "Saldo inicial", "Débitos", "Créditos", "Saldo final"]];
+      for (const cod of X.b.codigos) {
+        const f = X.b.filas.get(cod);
+        aoa.push([cod, f.nombre, "", "", "", r2a(f.sa), r2a(f.d), r2a(f.c), r2a(f.ns)]);
+        for (const r of X.porCuenta.get(cod) || []) aoa.push([cod, f.nombre, r[1], dvNit(r[1]), X.nom(r[1]), r2a(r[2]), r2a(r[3]), r2a(r[4]), r2a(r[5])]);
+      }
+      const D = X.val("1", "d") + X.val("2", "d") + X.val("3", "d") + X.val("4", "d") + X.val("5", "d") + X.val("6", "d") + X.val("7", "d");
+      const C = X.val("1", "c") + X.val("2", "c") + X.val("3", "c") + X.val("4", "c") + X.val("5", "c") + X.val("6", "c") + X.val("7", "c");
+      aoa.push([], ["", "Sumas del período (clases 1 a 7)", "", "", "", "", r2a(D), r2a(C), ""]);
+      return [{ nombre: "Balance por tercero", titulo: `Balance de prueba por tercero del 1 de enero al 31 de diciembre de ${X.y}`, aoa, anchos: [11, 36, 13, 4, 40, 16, 16, 16, 16], resumen: { total: X.b.filas.size, texto: `${fmt(X.b.filas.size)} cuentas y ${fmt(X.det.rows.length)} saldos por tercero; débitos ${fmt(D)} y créditos ${fmt(C)}.` } }];
+    },
+    mayor(X) {
+      const aoa = [["Cuenta", "Nombre de la cuenta", "Saldo inicial", "Débitos", "Créditos", "Saldo final"]];
+      for (const cod of X.b.codigos) { const f = X.b.filas.get(cod); if (f.dig <= 4) aoa.push([cod, f.nombre, r2a(f.sa), r2a(f.d), r2a(f.c), r2a(f.ns)]); }
+      return [{ nombre: "Mayor y balances", titulo: `Mayor y balances (cuentas de mayor) a 31 de diciembre de ${X.y}. Soporte en Excel: la copia del libro oficial se imprime desde el software contable.`, aoa, anchos: [10, 40, 18, 18, 18, 18], resumen: { texto: "Resumen de saldos por cuenta de mayor; adjuntar la copia escaneada del libro oficial." } }];
+    },
+    pasivos(X) {
+      const rows = relacionRQ(X, pref(["2"]), (sa, d, c, ns) => -ns).filter((x) => Math.abs(x.ns) >= 0.5 || x.sinTercero);
+      const primera = new Map();
+      if (X.libro) for (const r of X.libro.rows) { if (!r[F_CTA].startsWith("2") || !(r[F_C] > 0) || X.libro.ci.has(r[F_TIPO])) continue; const k = r[F_CTA] + "|" + r[F_NIT]; if (!primera.has(k) || r[F_FEC] < primera.get(k)) primera.set(k, r[F_FEC]); }
+      const aoa = [["Cuenta", "Concepto del pasivo", "NIT o cédula", "DV", "Nombre o razón social", "Fecha de inicio de la obligación", "Saldo inicial", "Aumentos del año", "Abonos del año", "Saldo final", "Objeto del pasivo (préstamos)", "Soporte de la forma como se recibió (préstamos)"]];
+      let total = 0;
+      for (const x of rows) {
+        const prestamo = /^(21|2355)/.test(x.cod);
+        const fi = x.sinTercero ? "" : Math.abs(x.sa) >= 0.5 ? `Viene de años anteriores (saldo a 31/12/${X.y - 1})` : primera.get(x.cod + "|" + x.nit) ? fechaC(primera.get(x.cod + "|" + x.nit)) : "";
+        aoa.push([x.cod, X.cta(x.cod), x.nit, dvNit(x.nit), x.sinTercero ? "Registrado en la cuenta sin tercero" : X.nom(x.nit), fi, r2a(-x.sa), r2a(x.c), r2a(x.d), r2a(x.v), prestamo ? "POR COMPLETAR" : "", prestamo ? "POR COMPLETAR" : ""]);
+        total += x.v;
+      }
+      const resumen = cierreRQ(aoa, total, [], X, 45, 9);
+      return [{ nombre: "R45 Pasivos", titulo: `Renglón 45 – Pasivos a 31 de diciembre de ${X.y}`, aoa, anchos: [11, 34, 13, 4, 40, 22, 16, 16, 16, 16, 30, 30], resumen: { ...resumen, texto: `${fmt(rows.length)} obligaciones. Complete objeto y soporte de los préstamos (cuentas 21 y 2355).` } }];
+    },
+    ingresos(X) {
+      const rows = relacionRQ(X, pref(["41", "42"], ["4175"]), (sa, d, c) => c - d);
+      const M = new Map();
+      for (const x of rows) { const k = x.sinTercero ? "" : x.nit; const m = M.get(k) || { nit: k, op: 0, no: 0 }; if (x.cod.startsWith("41")) m.op += x.v; else m.no += x.v; M.set(k, m); }
+      const xs = [...M.values()].sort((a, b) => b.op + b.no - (a.op + a.no));
+      const aoa = [["NIT o cédula", "DV", "Nombre o razón social", "Ingresos operacionales (41)", "Ingresos no operacionales (42)", "Total ingresos brutos"]];
+      let total = 0;
+      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), m.nit ? X.nom(m.nit) : "Registrado en la cuenta sin tercero", r2a(m.op), r2a(m.no), r2a(m.op + m.no)]); total += m.op + m.no; }
+      const resumen = cierreRQ(aoa, total, [], X, 58, 5);
+      return [{ nombre: "R58 Ingresos brutos", titulo: `Renglón 58 – Ingresos brutos por tercero, acumulados a 31 de diciembre de ${X.y} (sin devoluciones, que van en el renglón 59)`, aoa, anchos: [13, 4, 44, 20, 20, 20], resumen: { ...resumen, texto: `${fmt(xs.length)} terceros.` } }];
+    },
+    devoluciones(X) {
+      const rows = relacionRQ(X, pref(["4175"]), (sa, d, c) => d - c);
+      const M = new Map();
+      for (const x of rows) { const k = x.sinTercero ? "" : x.nit; M.set(k, (M.get(k) || 0) + x.v); }
+      const xs = [...M].sort((a, b) => b[1] - a[1]);
+      const aoa = [["NIT o cédula", "DV", "Nombre o razón social", "Devoluciones, rebajas y descuentos en ventas"]];
+      let total = 0;
+      for (const [n, v] of xs) { aoa.push([n, dvNit(n), n ? X.nom(n) : "Registrado en la cuenta sin tercero", r2a(v)]); total += v; }
+      const resumen = cierreRQ(aoa, total, [], X, 59, 3);
+      return [{ nombre: "R59 Devoluciones", titulo: `Renglón 59 – Devoluciones, rebajas y descuentos en ventas por tercero, acumulados a 31 de diciembre de ${X.y}`, aoa, anchos: [13, 4, 44, 22], resumen: { ...resumen, texto: `${fmt(xs.length)} terceros.` } }];
+    },
+    compras(X) {
+      if (!X.libro) throw new Error(`Para las compras de inventario se necesita el libro auxiliar de ${X.y} (cárguelo en Consulta de movimientos).`);
+      const L = X.libro, tipos = L.tipos;
+      const esCompra = (t) => /COMPRA|FACTURA DE GASTOS|DOCUMENTO SOPORTE|FACTURA DE PROVEEDOR/i.test(tipos[t] || "") && !/DEVOLUCI/i.test(tipos[t] || "");
+      const esDevol = (t) => /NOTA CREDITO PROVEEDOR|DEVOLUCI[OÓ]N DE PRODUCTOS|DEVOLUCION COMPRA|DIFERENCIA DEVOLUCION/i.test(tipos[t] || "");
+      const M = new Map(), otros = new Map();
+      for (const r of L.rows) {
+        if (!r[F_CTA].startsWith("14") || L.ci.has(r[F_TIPO])) continue;
+        if (esCompra(r[F_TIPO])) { const m = M.get(r[F_NIT]) || { c: 0, dv: 0 }; m.c += r[F_D] - r[F_C]; M.set(r[F_NIT], m); }
+        else if (esDevol(r[F_TIPO])) { const m = M.get(r[F_NIT]) || { c: 0, dv: 0 }; m.dv += r[F_C] - r[F_D]; M.set(r[F_NIT], m); }
+        else { const o = otros.get(r[F_TIPO]) || { d: 0, c: 0 }; o.d += r[F_D]; o.c += r[F_C]; otros.set(r[F_TIPO], o); }
+      }
+      const xs = [...M].filter(([, m]) => Math.abs(m.c) >= 0.5 || Math.abs(m.dv) >= 0.5).sort((a, b) => b[1].c - b[1].dv - (a[1].c - a[1].dv));
+      const aoa = [["NIT o cédula", "DV", "Proveedor", "Compras", "Devoluciones en compras", "Compras netas"]];
+      let tc = 0, td = 0;
+      for (const [n, m] of xs) { aoa.push([n, dvNit(n), X.nom(n) || L.nits[n] || "", r2a(m.c), r2a(m.dv), r2a(m.c - m.dv)]); tc += m.c; td += m.dv; }
+      aoa.push([], ["", "", "Total", r2a(tc), r2a(td), r2a(tc - td)]);
+      const ii = X.val("14", "sa"), iff = X.val("14", "ns"), costoJuego = ii + tc - td - iff, costo = X.val("6") + X.val("7"), dec = X.R(62);
+      const j = [["Juego de inventarios", ""], ["Inventario inicial (1 de enero)", r2a(ii)], ["(+) Compras", r2a(tc)], ["(−) Devoluciones en compras", r2a(-td)], ["(−) Inventario final (31 de diciembre)", r2a(-iff)], ["= Costo de ventas por juego de inventarios", r2a(costoJuego)], [],
+        ["Costo de ventas en la contabilidad (cuentas 6 y 7)", r2a(costo)], ["Diferencia: otros movimientos del inventario (detalle abajo)", r2a(costo - costoJuego)], ["Costo declarado (renglón 62)", dec], [],
+        ["Otros movimientos del inventario por tipo de comprobante", ""], ["Tipo", "Débitos (entradas)", "Créditos (salidas)", "Neto"]];
+      for (const [t, o] of [...otros].sort((a, b) => b[1].c - a[1].c)) j.push([`${t} · ${tipos[t] || ""}`, r2a(o.d), r2a(o.c), r2a(o.d - o.c)]);
+      j.push([], ["Control: inventario inicial + compras netas + otros movimientos netos = inventario final", r2a(ii + tc - td + [...otros.values()].reduce((s, o) => s + o.d - o.c, 0)), "Inventario final", r2a(iff)]);
+      return [
+        { nombre: "R39 Compras", titulo: `Compras de inventarios por proveedor, del 1 de enero al 31 de diciembre de ${X.y} (comprobantes de compra, gastos y documento soporte que afectan la cuenta 14)`, aoa, anchos: [13, 4, 44, 18, 18, 18], resumen: { total: tc - td, texto: `${fmt(xs.length)} proveedores; compras netas ${fmt(tc - td)}.` } },
+        { nombre: "R39 Juego inventarios", titulo: `Cálculo del costo de ventas por juego de inventarios – ${X.y}`, aoa: j, anchos: [70, 20, 20, 20], resumen: { texto: `Inventario inicial ${fmt(ii)}, final ${fmt(iff)}; costo por juego ${fmt(costoJuego)} frente a ${fmt(costo)} en la contabilidad.` } },
+      ];
+    },
+    costos(X, it) {
+      const pedidos = String(it.renglones || "62, 63, 64, 65, 66").split(/[^\d]+/).map(Number).filter((n) => n >= 62 && n <= 66);
+      const MAPA = { 62: [["6", "7"], []], 63: [["51"], []], 64: [["52"], []], 65: [["5305"], []], 66: [["53", "59"], ["5305"]] };
+      // Provisiones (5199) presentadas como "otros gastos y deducciones" (renglón 66): se detecta si la diferencia de 66 coincide con ellas.
+      const c66 = relacionRQ(X, pref(...MAPA[66]), (sa, d, c) => d - c).reduce((s, x) => s + x.v, 0);
+      const p5199 = relacionRQ(X, pref(["5199"]), (sa, d, c) => d - c).reduce((s, x) => s + x.v, 0);
+      const en66 = X.R(66) != null && Math.abs(p5199) >= 1000 && Math.abs(X.R(66) - p5199) <= Math.abs(c66) + 1000;
+      if (en66) { MAPA[63] = [["51"], ["5199"]]; MAPA[66] = [["53", "59", "5199"], ["5305"]]; }
+      const hojas = [];
+      for (const n of pedidos) {
+        const rows = relacionRQ(X, pref(...MAPA[n]), (sa, d, c) => d - c).filter((x) => Math.abs(x.v) >= 0.5);
+        const aoa = [["Cuenta", "Concepto", "NIT o cédula", "DV", "Nombre o razón social", "Valor"]];
+        let total = 0;
+        for (const x of rows) { aoa.push([x.cod, X.cta(x.cod), x.nit, dvNit(x.nit), x.sinTercero ? "Registrado en la cuenta sin tercero" : X.nom(x.nit), r2a(x.v)]); total += x.v; }
+        const ajustes = [];
+        if (n === 65) {
+          const gmf = rows.filter((x) => /GRAVAMEN|GMF|4\s*X\s*1000|CUATRO POR MIL/i.test(X.cta(x.cod))).reduce((s, x) => s + x.v, 0);
+          if (gmf) ajustes.push(["(−) 50 % del gravamen a los movimientos financieros, no deducible (art. 115 E.T.)", -gmf / 2]);
+        }
+        const resumen = cierreRQ(aoa, total, ajustes, X, n, 5);
+        const nota = n === 66 && en66 ? " Incluye las provisiones (cuenta 5199), presentadas en este renglón." : n === 63 && en66 ? " Sin las provisiones (cuenta 5199), que se presentaron en el renglón 66." : "";
+        hojas.push({ nombre: `R${n} ${{ 62: "Costos", 63: "Gastos admon", 64: "Gastos ventas", 65: "Gastos financ", 66: "Otros gastos" }[n]}`, titulo: `Renglón ${n} – ${R110[n]} ${X.y}, por concepto (cuenta) y tercero.${nota}`, aoa, anchos: [11, 36, 13, 4, 44, 18], resumen: { ...resumen, renglon: n, texto: `${fmt(rows.length)} partidas.${nota}` } });
+      }
+      return hojas;
+    },
+    retenciones(X) {
+      if (!X.libro) throw new Error(`Para las retenciones se necesita el libro auxiliar de ${X.y} (cárguelo en Consulta de movimientos).`);
+      const L = X.libro, nitEmp = S.cfg.empresa.nit.replace(/\D/g, "").slice(0, 9);
+      const ctas = new Set(Object.entries(L.cuentas).filter(([c, n]) => c.startsWith("1355") && /RETENCI[OÓ]N EN LA FUENTE/i.test(n)).map(([c]) => c));
+      const esNota = (t) => /NOTA (DE )?CONTABILIDAD/i.test(L.tipos[t] || "");
+      const M = new Map(); let nota = 0, propio = 0;
+      for (const r of L.rows) {
+        if (!ctas.has(r[F_CTA]) || L.ci.has(r[F_TIPO])) continue;
+        if (esNota(r[F_TIPO])) { nota += r[F_D] - r[F_C]; continue; }
+        if (r[F_NIT] === nitEmp) { propio += r[F_D] - r[F_C]; continue; }
+        const conc = /CONCILIACION/i.test(L.tipos[r[F_TIPO]] || "") ? "Retención practicada por entidad financiera" : /RECIBO/i.test(L.tipos[r[F_TIPO]] || "") ? "Retención practicada en el pago (recibo de caja)" : /NOTA CREDITO/i.test(L.tipos[r[F_TIPO]] || "") ? "Reversión por nota crédito" : /FACTURA/i.test(L.tipos[r[F_TIPO]] || "") ? "Retención en la fuente por ventas" : (L.tipos[r[F_TIPO]] || r[F_TIPO]);
+        const k = r[F_NIT] + "|" + conc;
+        const m = M.get(k) || { nit: r[F_NIT], conc, base: 0, v: 0 };
+        m.base += r[F_BASE]; m.v += r[F_D] - r[F_C]; M.set(k, m);
+      }
+      const xs = [...M.values()].filter((m) => Math.abs(m.v) >= 0.5).sort((a, b) => a.nit.localeCompare(b.nit, "es", { numeric: true }) || a.conc.localeCompare(b.conc));
+      const aoa = [["NIT del agente retenedor", "DV", "Nombre o razón social", "Concepto", "Base", "Valor retenido", "Certificado"]];
+      let total = 0;
+      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), "POR ADJUNTAR"]); total += m.v; }
+      const resumen = cierreRQ(aoa, total, [], X, 106, 5);
+      aoa.push([], ["Movimientos de la cuenta no incluidos en la relación:"], ["", "", "", "Notas de contabilidad (liquidación de autorretención y aplicación a la declaración)", "", r2a(nota)]);
+      if (propio) aoa.push(["", "", "", "Movimientos con el NIT de la propia empresa", "", r2a(propio)]);
+      return [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.` } }];
+    },
+    certificados(X) {
+      const M = new Map();
+      const add = (nit, k, v) => { if (!nit || Math.abs(v) < 0.5) return; const m = M.get(nit) || { obligaciones: 0, intereses: 0, comisiones: 0, gmf: 0 }; m[k] += v; M.set(nit, m); };
+      for (const r of X.det.rows) {
+        const c = r[0], nombre = X.cta(c);
+        if (c.startsWith("21")) add(r[1], "obligaciones", -r[5]);
+        else if (c.startsWith("5305")) add(r[1], /GRAVAMEN|GMF|4\s*X\s*1000/i.test(nombre) ? "gmf" : /INTERES/i.test(nombre) ? "intereses" : "comisiones", r[3] - r[4]);
+      }
+      // Solo entidades financieras: por el nombre, o porque cobraron intereses, comisiones o GMF por más de $100.000.
+      const FIN = /BANCO|BANCOLOMBIA|DAVIVIENDA|BBVA|COLPATRIA|SCOTIABANK|ITA[UÚ]|GNB|PICHINCHA|FALABELLA|BANCAM[IÍ]A|SERFINANZA|FINANCIER|LEASING|FIDUCIARIA|COOPERATIVA|CREDIBANCO|REDEBAN|SISTECREDITO|ASOPAGOS|NEQUI|DAVIPLATA|BOLD|WOMPI|CORFICOLOMBIANA|CAJA SOCIAL|AV VILLAS|OCCIDENTE|POPULAR|AGRARIO/i;
+      for (const [n, m] of [...M]) if (!(FIN.test(X.nom(n)) && !/UNIVERSIDAD|SEGUROS/i.test(X.nom(n)) && (m.intereses + m.comisiones + m.gmf >= 1000 || m.obligaciones >= 1000))) M.delete(n);
+      const aoa = [["NIT", "DV", "Entidad", "Obligaciones a 31-dic", "Intereses", "Comisiones y gastos bancarios", "GMF", "Total deducido", "Certificado tributario anual"]];
+      for (const [n, m] of [...M].sort((a, b) => b[1].intereses + b[1].comisiones + b[1].gmf - (a[1].intereses + a[1].comisiones + a[1].gmf))) aoa.push([n, dvNit(n), X.nom(n), r2a(m.obligaciones), r2a(m.intereses), r2a(m.comisiones), r2a(m.gmf), r2a(m.intereses + m.comisiones + m.gmf), "POR SOLICITAR"]);
+      aoa.push([], ["Además de los bancos, revise si hubo pagos a otras entidades financieras (leasing, fiducias, datáfonos) que deban certificar intereses o comisiones."]);
+      return [{ nombre: "Certificados financieros", titulo: `Entidades financieras con obligaciones o gastos financieros en ${X.y}: solicitar a cada una el certificado tributario anual`, aoa, anchos: [13, 4, 40, 18, 16, 18, 16, 16, 20], resumen: { texto: `${fmt(M.size)} entidades.` } }];
+    },
+    cambio(X) {
+      const ctas = X.b.codigos.filter((c) => /DIFERENCIA EN CAMBIO/i.test(X.cta(c)) || /^(421020|530525)/.test(c)).filter((c) => { const f = X.b.filas.get(c); return Math.abs(f.d) + Math.abs(f.c) + Math.abs(f.ns) >= 0.5; });
+      const aoa = ctas.length ? [["Cuenta", "Nombre", "Débitos", "Créditos", "Saldo"], ...ctas.map((c) => { const f = X.b.filas.get(c); return [c, f.nombre, r2a(f.d), r2a(f.c), r2a(f.ns)]; })]
+        : [[`Durante el año gravable ${X.y} la contabilidad no registra diferencia en cambio: no hay movimientos en cuentas de diferencia en cambio (421020 ingreso, 530525 gasto) ni otras cuentas con ese nombre.`], ["Verifique que la sociedad no tuvo operaciones en moneda extranjera (compras o pagos en dólares) antes de responder."]];
+      return [{ nombre: "Diferencia en cambio", titulo: `Diferencia en cambio ${X.y}`, aoa, anchos: ctas.length ? [11, 40, 18, 18, 18] : [140], resumen: { texto: ctas.length ? `${ctas.length} cuentas con movimiento: requiere el cuadro con facturas, TRM y pagos.` : "Sin diferencia en cambio registrada.", sinMovimiento: !ctas.length } }];
+    },
+    eeff: () => [], otro: () => [],
+  };
+  const NECESITA_LIBRO = new Set(["pasivos", "compras", "retenciones"]);
+
+  async function anexosRQ(q, soloN) {
+    const its = q.items.filter((it) => (soloN == null || it.n === soloN) && it.estado !== "noaplica" && GEN_RQ[it.tipo]);
+    const conLibro = its.some((it) => NECESITA_LIBRO.has(it.tipo));
+    const X = await datosRQ(q.anio, conLibro);
+    const hojas = [];
+    for (const it of its) {
+      try { for (const h of GEN_RQ[it.tipo](X, it)) hojas.push({ ...h, it }); }
+      catch (err) { hojas.push({ it, error: err.message }); }
+    }
+    return { X, hojas };
+  }
+  async function excelRQ(q, soloN) {
+    try {
+      RQ.ocupado = "Preparando los anexos…"; render();
+      await asegurarLibreria("XLSX", URLS_XLSX.slice(1));
+      if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
+      const { X, hojas } = await anexosRQ(q, soloN);
+      const e = S.cfg.empresa, wb = XLSX.utils.book_new(), usados = new Set();
+      const cab = (h) => [[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero}${q.fecha ? ` del ${fechaC(q.fecha)}` : ""}${q.expediente ? ` · Expediente ${q.expediente}` : ""}`], [`Año gravable ${q.anio} · Numeral ${h.it.n}: ${h.titulo || ""}`], []];
+      const idx = [];
+      for (const h of hojas) {
+        if (h.error) { idx.push([h.it.n, textoItem(h.it, q), "", null, null, null, h.error]); continue; }
+        let nom = `N${h.it.n} ${h.nombre}`.slice(0, 31); let k = 2; while (usados.has(nom)) nom = `${nom.slice(0, 28)} ${k++}`; usados.add(nom);
+        const ws = XLSX.utils.aoa_to_sheet([...cab(h), ...h.aoa]);
+        ws["!cols"] = h.anchos.map((w) => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, ws, nom);
+        const r = h.resumen || {};
+        idx.push([h.it.n, textoItem(h.it, q).slice(0, 250), nom, r.neto ?? r.total ?? null, r.declarado ?? null, r.dif ?? null, r.texto || ""]);
+      }
+      for (const it of q.items) if ((soloN == null || it.n === soloN) && (it.tipo === "eeff" || it.tipo === "otro")) idx.push([it.n, textoItem(it, q).slice(0, 250), "", null, null, null, it.tipo === "eeff" ? "Adjuntar los estados financieros firmados (Años cerrados → PDF)." : "Documento por adjuntar."]);
+      idx.sort((a, b) => a[0] - b[0]);
+      const wi = XLSX.utils.aoa_to_sheet([[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero} – ${q.impuesto} año gravable ${q.anio}`], [], ["Numeral", "Solicitud", "Hoja", "Total relacionado", "Valor declarado", "Diferencia", "Observación"], ...idx]); wi["!cols"] = [8, 70, 26, 18, 18, 16, 60].map((w) => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, wi, "Indice");
+      wb.SheetNames.unshift(wb.SheetNames.pop());
+      const data = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true, bookSST: true });
+      RQ.ocupado = ""; render();
+      await guardarArchivo(soloN == null ? `Anexos_requerimiento_${q.numero}_AG${q.anio}.xlsx` : `Anexo_N${soloN}_requerimiento_${q.numero}.xlsx`, data);
+      // Lo que se pudo generar queda como avance del numeral.
+      let cambio = false;
+      for (const h of hojas) if (!h.error && h.it.estado === "pendiente") { h.it.estado = "proceso"; cambio = true; }
+      if (cambio) { await guardarRQ(q); render(); }
+    } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `No se pudieron generar los anexos: ${err.message}`; render(); }
+  }
+
+  /* ---------- carta de respuesta (Word) */
+  async function cartaRQ(q) {
+    try {
+      RQ.ocupado = "Preparando la carta…"; render();
+      let A = null;
+      try { A = await anexosRQ(q); } catch (err) { A = { hojas: [], err: err.message }; }
+      const e = S.cfg.empresa, fir = firmantes(`${q.anio}-12`), rep = fir.find((f) => /representante|gerente/i.test(f.cargo)) || fir[0];
+      const porN = (n) => (A.hojas || []).filter((h) => h.it.n === n && !h.error);
+      const m = (v) => (v == null ? "—" : "$ " + fmt(v));
+      const hoy = new Date().toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
+      const parr = q.items.map((it) => {
+        const hs = porN(it.n), r = hs[0]?.resumen || {};
+        let t = "";
+        if (it.estado === "noaplica") t = "No aplica para la sociedad en el año gravable.";
+        else switch (it.tipo) {
+          case "eeff": t = `Se adjuntan los estados financieros del año gravable ${q.anio} (estado de situación financiera, estado de resultado integral, estado de cambios en el patrimonio, estado de flujos de efectivo y notas), firmados por el representante legal, el contador y el revisor fiscal.`; break;
+          case "mayor": t = `Se adjunta copia escaneada del libro mayor y balances a 31 de diciembre de ${q.anio}. En la hoja «${hs[0] ? "Mayor y balances" : ""}» del archivo de anexos se incluyen además los saldos por cuenta de mayor en Excel.`; break;
+          case "balance": t = `Se adjunta en Excel el balance de prueba a 8 dígitos por tercero del 1 de enero al 31 de diciembre de ${q.anio}. ${r.texto || ""}`; break;
+          case "pasivos": t = `Se adjunta en Excel la relación de los pasivos a 31 de diciembre de ${q.anio} por tercero, con la fecha de inicio de cada obligación, los aumentos y abonos del año y el saldo final, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 45${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}. Para los préstamos de dinero se indica el objeto y el soporte de la forma como se recibieron [COMPLETAR en el Excel: objeto y soporte de cada préstamo].`; break;
+          case "ingresos": t = `Se adjunta en Excel la relación de los ingresos brutos por tercero acumulados a 31 de diciembre de ${q.anio}, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 58.`; break;
+          case "devoluciones": t = `Se adjunta en Excel la relación de las devoluciones, rebajas y descuentos en ventas por tercero, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 59.`; break;
+          case "compras": { const j = hs[1]?.resumen?.texto || ""; t = `Se adjunta en Excel la relación de compras de inventarios por proveedor del 1 de enero al 31 de diciembre de ${q.anio}, por ${m(r.total)}, y el cálculo del costo de ventas por juego de inventarios. ${j}`; break; }
+          case "costos": t = `Se adjunta en Excel, en una hoja por renglón, la relación de los costos y gastos por concepto y tercero: ${hs.map((h) => `renglón ${h.resumen.renglon} ${m(h.resumen.neto)} (declarado ${m(h.resumen.declarado)})`).join("; ")}. En cada hoja se parte del valor contable y se muestra la conciliación con el valor declarado; la diferencia corresponde a [COMPLETAR: partidas no deducibles y ajustes fiscales, según la conciliación fiscal – formato 2516].`; break;
+          case "retenciones": t = `Se adjunta en Excel la relación de las otras retenciones por agente retenedor, con el concepto, la base y el valor retenido, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 106${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}, junto con los certificados de retención expedidos por los agentes retenedores.`; break;
+          case "certificados": t = `Se adjuntan copias de los certificados tributarios anuales expedidos por las entidades financieras (${(r.texto || "").replace(/\.$/, "")}) que soportan lo deducido por intereses, comisiones, servicios y GMF.`; break;
+          case "cambio": t = r.sinMovimiento ? `Durante el año gravable ${q.anio} la sociedad no realizó operaciones en moneda extranjera; por lo tanto, no registró diferencia en cambio realizada ni no realizada.` : `Se adjunta el cuadro explicativo de la diferencia en cambio realizada y no realizada con sus auxiliares y soportes.`; break;
+          default: t = "Se adjunta la información solicitada.";
+        }
+        return `<p><b>${it.n}.</b> <i>${esc(textoItem(it, q))}</i></p><p><b>Respuesta:</b> ${esc(t)}</p>`;
+      }).join("");
+      const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Respuesta requerimiento ${esc(q.numero)}</title>
+        <style>body{font-family:Arial,sans-serif;font-size:11pt;line-height:1.35} p{margin:0 0 8pt} h3{font-size:11pt}</style></head><body>
+        <p>Santa Marta, ${esc(hoy)}</p><br>
+        <p>Señores<br><b>DIRECCIÓN SECCIONAL DE IMPUESTOS Y ADUANAS DE SANTA MARTA</b><br>División de Fiscalización y Liquidación Tributaria Intensiva<br>${esc(q.correo || "")}${q.copia ? `<br>Con copia a: ${esc(q.copia)}` : ""}</p><br>
+        <p><b>Asunto:</b> Respuesta Requerimiento Ordinario No. ${esc(q.numero)}${q.fecha ? ` del ${esc(fechaLarga(q.fecha))}` : ""}${q.proyecto ? ` – Proyectó: ${esc(q.proyecto)}` : ""}<br>
+        Expediente: ${esc(q.expediente || "")}<br>Contribuyente: ${esc(e.razon)} – NIT ${esc(e.nit)}<br>${esc(q.impuesto)} – Año gravable ${q.anio}</p><br>
+        <p>${esc(rep?.nombre || "")}, identificada con cédula de ciudadanía No. [COMPLETAR], en calidad de ${esc(rep?.cargo || "representante legal")} de ${esc(e.razon)}, sociedad identificada con NIT ${esc(e.nit)}, según el certificado de existencia y representación legal que se adjunta, y dentro del término señalado en el artículo 686 del Estatuto Tributario, doy respuesta al requerimiento de la referencia en el orden en que fue formulado:</p>
+        ${parr}
+        <p><b>Anexos:</b> archivo en Excel «Anexos_requerimiento_${esc(q.numero)}_AG${q.anio}.xlsx» con una hoja por numeral; estados financieros firmados; copia del libro mayor y balances; certificados de retención y certificados tributarios de las entidades financieras; certificado de existencia y representación legal.</p><br>
+        <p>Atentamente,</p><br><br><p><b>${esc(rep?.nombre || "")}</b><br>${esc(rep?.cargo || "Representante legal")}<br>${esc(e.razon)} – NIT ${esc(e.nit)}<br>Dirección: CR 13 A 22 26 BRR ALCAZARES, Santa Marta · contabilidad@districlinicas.com</p>
+        ${A.err ? `<p style="color:#b42318">Nota interna (borrar antes de enviar): no se pudieron calcular los totales de los anexos: ${esc(A.err)}</p>` : ""}
+        </body></html>`;
+      RQ.ocupado = ""; render();
+      await guardarArchivo(`Respuesta_requerimiento_${q.numero}.doc`, new Blob(["﻿", html], { type: "application/msword" }));
+    } catch (err) { console.error(err); RQ.ocupado = ""; RQ.error = `No se pudo preparar la carta: ${err.message}`; render(); }
+  }
+
+  /* ---------- PDF del requerimiento */
+  async function subirPdfRQ(q, file) {
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      let bin = ""; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+      const b64 = btoa(bin);
+      if (b64.length > 1000000) throw new Error("el PDF pesa más de 700 KB; guárdelo en la carpeta del requerimiento.");
+      if (S.db) await S.db.doc(`requerimientosPdf/${q.numero}`).set({ numero: q.numero, nombre: file.name, d: b64 });
+      q.pdf = true; q.pdfNombre = file.name; q._pdf = b64;
+      await guardarRQ(q); toast("PDF del requerimiento guardado."); render();
+    } catch (err) { toast(`No se pudo guardar el PDF: ${err.message}`); }
+  }
+  async function bajarPdfRQ(q) {
+    try {
+      let b64 = q._pdf;
+      if (!b64 && S.db) { const s = await S.db.doc(`requerimientosPdf/${q.numero}`).get(); if (s.exists) b64 = s.data().d; }
+      if (!b64) throw new Error("no hay PDF guardado.");
+      const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      await guardarArchivo(q.pdfNombre || `Requerimiento_${q.numero}.pdf`, u);
+    } catch (err) { toast(`No se pudo descargar: ${err.message}`); }
+  }
+  async function borrarRQ(numero) {
+    try { if (S.db) { await S.db.doc(`requerimientos/${numero}`).delete(); try { await S.db.doc(`requerimientosPdf/${numero}`).delete(); } catch { /* */ } } RQ.docs.delete(numero); RQ.sel = null; RQ.confirmar = null; toast("Requerimiento eliminado."); }
+    catch (err) { toast(`No se pudo eliminar: ${err.message || err.code}`); }
+    render();
+  }
+
+  /* ---------- vista */
+  function chipVence(q) {
+    const v = venceRQ(q); if (!v) return `<span class="chip gris">Sin fecha de notificación</span>`;
+    const pend = q.items.some((it) => it.estado !== "listo" && it.estado !== "noaplica");
+    if (!pend || q.respondido) return `<span class="chip ok">Respondido</span>`;
+    const d = diasEntre(hoyISO(), v);
+    return `<span class="chip ${d < 0 ? "error" : d <= 5 ? "advertencia" : "info"}">${d < 0 ? `Vencido hace ${-d} días` : d === 0 ? "Vence hoy" : `Vence en ${d} días`} · ${esc(fechaC(v))}</span>`;
+  }
+  function vistaReq() {
+    let html = "";
+    if (RQ.ocupado) html += `<div class="aviso info"><p><span class="girando" aria-hidden="true"></span>${esc(RQ.ocupado)}</p></div>`;
+    if (RQ.error) html += `<div class="aviso error"><p>${esc(RQ.error)}</p></div>`;
+    const qs = [...RQ.docs.values()].sort((a, b) => (venceRQ(a) || "9").localeCompare(venceRQ(b) || "9") || b.numero.localeCompare(a.numero));
+    html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start"><div><h2>Requerimientos de la DIAN</h2>
+      <p class="sub" style="margin:0">Registre cada requerimiento con sus numerales, lleve el control del plazo y de quién responde cada punto, y genere los anexos en Excel y el borrador de la carta con la información contable del año.</p></div>
+      <button class="btn primario" data-rq="nuevo">Nuevo requerimiento</button></div>
+      ${qs.length ? `<div class="tabla-env" style="margin-top:12px"><table class="lista"><thead><tr><th>Número</th><th>Impuesto y año</th><th>Fecha</th><th>Plazo</th><th>Avance</th><th></th></tr></thead><tbody>
+        ${qs.map((q) => { const ok = q.items.filter((it) => it.estado === "listo" || it.estado === "noaplica").length; return `<tr${RQ.sel === q.numero ? ' style="background:var(--acento-suave)"' : ""}><td><b>${esc(q.numero)}</b><br><small>Exp. ${esc(q.expediente || "—")}</small></td><td>${esc(q.impuesto)}<br><small>Año gravable ${q.anio}</small></td><td>${esc(fechaC(q.fecha || ""))}</td><td>${chipVence(q)}</td><td>${ok} de ${q.items.length} numerales listos</td>
+          <td class="num"><button class="btn chico" data-rq="abrir" data-id="${esc(q.numero)}">Abrir</button></td></tr>`; }).join("")}</tbody></table></div>` : ""}</section>`;
+    if (RQ.nuevo) html += formNuevoRQ();
+    const q = RQ.docs.get(RQ.sel);
+    if (q) html += detalleRQ(q);
+    else if (!qs.length && !RQ.nuevo) html += `<section class="panel"><p class="vacio">Todavía no hay requerimientos registrados.</p></section>`;
+    return html;
+  }
+  function formNuevoRQ() {
+    const f = RQ.nuevo;
+    const inp = (k, t, tipo = "text", ph = "") => `<label>${t}<input type="${tipo}" data-rqn="${k}" value="${esc(f[k] ?? "")}" placeholder="${esc(ph)}"></label>`;
+    return `<section class="panel"><h2>Nuevo requerimiento</h2><p class="sub">Copie los datos del encabezado del requerimiento y marque los numerales que trae. La lista parte del modelo de requerimiento ordinario de renta de la DIAN; ajuste los textos si cambian.</p>
+      <div class="cq-filtros">${inp("numero", "Número del requerimiento", "text", "2026019040001153")}${inp("fecha", "Fecha del requerimiento", "date")}${inp("expediente", "Expediente")}${inp("anio", "Año gravable", "number")}
+        ${inp("impuesto", "Impuesto")}${inp("notificado", "Fecha de notificación", "date")}${inp("plazo", "Plazo para responder (días calendario)", "number")}${inp("proyecto", "Funcionario que proyectó", "text", "Nombre que va en el asunto")}${inp("correo", "Correo de respuesta")}${inp("copia", "Con copia a")}</div>
+      <div class="tabla-env" style="margin-top:12px"><table class="lista cq"><thead><tr><th></th><th>Anexo</th><th>Texto del numeral</th><th>Renglones</th></tr></thead><tbody>
+        ${f.items.map((it, i) => `<tr><td><input type="checkbox" data-rqni="${i}" data-k="incluir" ${it.incluir ? "checked" : ""} aria-label="Incluir"></td><td><small>${esc(TIPO_RQ[it.tipo])}</small></td>
+          <td><textarea data-rqni="${i}" data-k="texto" rows="2" style="width:100%;min-width:320px">${esc(it.texto)}</textarea></td><td>${it.tipo === "costos" ? `<input type="text" data-rqni="${i}" data-k="renglones" value="${esc(it.renglones)}" style="width:130px">` : ""}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="fila" style="margin-top:12px"><button class="btn primario" data-rq="crear">Crear requerimiento</button><button class="btn" data-rq="cancelar-nuevo">Cancelar</button></div></section>`;
+  }
+  function detalleRQ(q) {
+    const y = q.anio, tieneAn = AN.docs.has(y), tieneLibro = unidadesCQ(y).length > 0, decl = rentaVigente(y);
+    const falta = (ok, t, link) => `<li>${ok ? '<span class="chip ok">Cargado</span>' : '<span class="chip advertencia">Falta</span>'} ${t}${ok ? "" : ` — <a href="#" data-nav="${link}">cargar</a>`}</li>`;
+    const inp = (k, t, tipo = "text") => `<label>${t}<input type="${tipo}" data-rqc="${k}" value="${esc(q[k] ?? "")}"></label>`;
+    return `<section class="panel cq-compro"><div class="fila" style="justify-content:space-between;align-items:flex-start">
+        <div><h2>Requerimiento ${esc(q.numero)}</h2><p class="sub" style="margin:0">${esc(q.impuesto)} · año gravable ${y}${q.fecha ? ` · del ${esc(fechaLarga(q.fecha))}` : ""} · ${chipVence(q)}</p></div>
+        <div class="fila"><button class="btn primario" data-rq="excel" data-id="${esc(q.numero)}">Anexos en Excel</button><button class="btn" data-rq="carta" data-id="${esc(q.numero)}">Carta de respuesta (Word)</button>
+          ${q.pdf ? `<button class="btn" data-rq="pdf" data-id="${esc(q.numero)}">PDF recibido</button>` : `<button class="btn" data-rq="subir-pdf">Guardar el PDF recibido</button>`}</div></div>
+      <div class="cq-filtros" style="margin-top:12px">${inp("fecha", "Fecha del requerimiento", "date")}${inp("notificado", "Fecha de notificación", "date")}${inp("plazo", "Plazo (días calendario)", "number")}${inp("expediente", "Expediente")}${inp("proyecto", "Funcionario que proyectó")}${inp("correo", "Correo de respuesta")}${inp("copia", "Con copia a")}${inp("radicado", "Radicado de la respuesta")}</div>
+      <p class="pie">Vence a los ${q.plazo || 15} días calendario de la notificación${venceRQ(q) ? `: <b>${esc(fechaLarga(venceRQ(q)))}</b>` : ""}. No responder a tiempo acarrea la sanción del artículo 651 del Estatuto Tributario.</p>
+      <h3 style="margin:14px 0 6px">Información del año ${y} que usan los anexos</h3><ul class="hallazgos">${falta(tieneAn, `Balance por tercero ${y} (Años cerrados)`, "anual:cargar")}${falta(tieneLibro, `Libro auxiliar ${y} (para pasivos, compras y retenciones)`, "consulta:resumen")}${falta(Boolean(decl), `Declaración de renta ${y}${decl ? ` (formulario ${esc(decl.formulario)})` : ""}`, "renta")}</ul></section>
+      <section class="panel"><h2>Numerales</h2><div class="tabla-env"><table class="lista cq"><thead><tr><th>N.°</th><th>Solicitud</th><th>Anexo</th><th>Estado</th><th>Responsable</th><th>Notas</th></tr></thead><tbody>
+      ${q.items.map((it, i) => `<tr><td><b>${it.n}</b></td><td class="cq-conc" style="max-width:420px">${esc(textoItem(it, q))}</td>
+        <td>${esc(TIPO_RQ[it.tipo] || it.tipo)}${GEN_RQ[it.tipo] && !["eeff", "otro"].includes(it.tipo) ? `<br><button class="btn chico" data-rq="excel-n" data-id="${esc(q.numero)}" data-n="${it.n}">Excel</button>` : it.tipo === "eeff" ? `<br><button class="btn chico" data-rq="eeff" data-anio="${y}">Ver estados</button>` : ""}</td>
+        <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select></td>
+        <td><input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" style="width:120px" aria-label="Responsable"></td>
+        <td><textarea data-rqi="${i}" data-k="notas" rows="2" style="min-width:200px" aria-label="Notas">${esc(it.notas || "")}</textarea></td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="fila" style="margin-top:12px;justify-content:space-between"><span class="pie" style="margin:0">Los anexos se arman con la contabilidad y se cuadran contra el renglón declarado; las diferencias quedan señaladas en cada hoja para explicarlas antes de enviar.</span>
+        ${RQ.confirmar === q.numero ? `<span><button class="btn chico peligro" data-rq="borrar" data-id="${esc(q.numero)}">Eliminar</button> <button class="btn chico" data-rq="cancelar">No</button></span>` : `<button class="btn chico" data-rq="pedir-borrar" data-id="${esc(q.numero)}">Eliminar requerimiento</button>`}</div></section>`;
+  }
+
+  /* ---------- eventos */
+  function clicReq(t) {
+    const a = t.dataset.rq; if (!a) return false;
+    const q = RQ.docs.get(t.dataset.id || RQ.sel);
+    if (a === "nuevo") { nuevoRQ(); RQ.error = ""; render(); }
+    else if (a === "cancelar-nuevo") { RQ.nuevo = null; RQ.error = ""; render(); }
+    else if (a === "crear") crearRQ();
+    else if (a === "abrir") { RQ.sel = t.dataset.id; RQ.nuevo = null; RQ.error = ""; render(); }
+    else if (a === "excel" && q) excelRQ(q);
+    else if (a === "excel-n" && q) excelRQ(q, Number(t.dataset.n));
+    else if (a === "carta" && q) cartaRQ(q);
+    else if (a === "pdf" && q) bajarPdfRQ(q);
+    else if (a === "subir-pdf") $("#archivo-rq").click();
+    else if (a === "eeff") { S.an.anio = Number(t.dataset.anio); S.an.vista = "esf"; S.tab = "anual"; render(); window.scrollTo(0, 0); }
+    else if (a === "pedir-borrar") { RQ.confirmar = t.dataset.id; render(); }
+    else if (a === "cancelar") { RQ.confirmar = null; render(); }
+    else if (a === "borrar") borrarRQ(t.dataset.id);
+    return true;
+  }
+  function cambioReq(el) {
+    if (el.id === "archivo-rq") { const q = RQ.docs.get(RQ.sel); if (q && el.files[0]) subirPdfRQ(q, el.files[0]); el.value = ""; return true; }
+    if (el.dataset.rqni !== undefined) { const it = RQ.nuevo.items[Number(el.dataset.rqni)]; it[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; return true; }
+    if (el.dataset.rqn) { RQ.nuevo[el.dataset.rqn] = el.value; if (el.dataset.rqn === "fecha" && !RQ.nuevo.notificado) RQ.nuevo.notificado = el.value; if (el.type === "date") render(); return true; }
+    const q = RQ.docs.get(RQ.sel); if (!q) return false;
+    if (el.dataset.rqi !== undefined) { const it = q.items[Number(el.dataset.rqi)]; it[el.dataset.k] = el.value; guardarRQ(q).then(() => { if (el.tagName === "SELECT") render(); }); return true; }
+    if (el.dataset.rqc) { q[el.dataset.rqc] = el.dataset.rqc === "plazo" ? Number(el.value) : el.value; guardarRQ(q).then(render); return true; }
+    return false;
+  }
+  function entradaReq(el) {
+    if (el.dataset.rqni !== undefined && el.type !== "checkbox") { RQ.nuevo.items[Number(el.dataset.rqni)][el.dataset.k] = el.value; return true; }
+    if (el.dataset.rqn) { RQ.nuevo[el.dataset.rqn] = el.value; return true; }
+    const q = RQ.docs.get(RQ.sel); if (!q) return false;
+    if (el.dataset.rqi !== undefined && el.tagName !== "SELECT") { q.items[Number(el.dataset.rqi)][el.dataset.k] = el.value; clearTimeout(RQ.h); RQ.h = setTimeout(() => guardarRQ(q), 700); return true; }
     return false;
   }
 
@@ -9927,9 +10406,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
 
   /* ------------------------------------------------------------ eventos */
   document.addEventListener("click", (ev) => {
-    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
+    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],[data-rq],#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
     if (!t) return;
     if ((t.id === "zona-rt" || t.dataset.rt) && clicRenta(t)) return;
+    if (t.dataset.rq && clicReq(t)) return;
     if ((t.id === "zona-an" || t.dataset.an) && clicAnual(t)) return;
     if ((t.id === "zona-cq" || t.dataset.cq) && clicConsulta(t)) return;
     if ((t.id === "zona-dn" || t.dataset.dn || t.dataset.dndif !== undefined) && clicDian(t)) return;
@@ -10008,6 +10488,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (entradaDian(el)) return;
     if (entradaConsulta(el)) return;
     if (entradaAnual(el)) return;
+    if (entradaReq(el)) return;
     if (el.id === "pv-filtro") { S.pv.filtro = el.value; clearTimeout(S.pv.h); S.pv.h = setTimeout(() => { render(); const f = $("#pv-filtro"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }, 250); return; }
     if (!S.borrador) return;
     if (el.dataset.cfg) { asignar(S.borrador, el.dataset.cfg, valorCampo(el, el.dataset.cfg)); marcarSucio(); }
@@ -10020,6 +10501,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (cambioConsulta(el)) return;
     if (cambioAnual(el)) return;
     if (cambioRenta(el)) return;
+    if (cambioReq(el)) return;
     if (el.id === "archivo-pv" && el.files.length) { leerArchivosPV([...el.files]); el.value = ""; return; }
     if (el.id === "pv-corte") { S.pv.corte = el.value; return render(); }
     if (el.id === "pv-alcance") { S.pv.alcance = el.value; return; }
@@ -10159,6 +10641,12 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     db.doc("verifDianMarcas/general").onSnapshot((snap) => {
       S.dn.marcas = snap.exists ? { ...snap.data() } : {};
       if (!S.cargando && S.tab === "dian" && !S.dn.ocupado && !document.activeElement?.dataset?.dnmarca) render();
+    }, () => {});
+    db.collection("requerimientos").onSnapshot((snap) => {
+      const prev = S.rq.docs;
+      S.rq.docs = new Map(snap.docs.map((d) => { const x = d.data(); x.anio = Number(x.anio); if (prev.get(d.id)?._pdf) x._pdf = prev.get(d.id)._pdf; return [d.id, x]; }));
+      const ae = document.activeElement;
+      if (!S.cargando && S.tab === "req" && !S.rq.ocupado && !(ae && (ae.dataset?.rqi !== undefined || ae.dataset?.rqc || ae.dataset?.rqn || ae.dataset?.rqni !== undefined))) render();
     }, () => {});
     db.collection("renta").onSnapshot((snap) => {
       const prev = S.rt.docs;
