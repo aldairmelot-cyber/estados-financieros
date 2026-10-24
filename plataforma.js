@@ -171,7 +171,7 @@
   }
 
   /* Colecciones que usa la app (para respaldar y restaurar en modo compartido). */
-  const COLECCIONES = ["config", "meses", "impuestos", "terceros", "declaraciones", "conciliaciones", "concLibro", "concBanco", "concPasarela", "proveedores", "provAcuerdos", "verifDian", "verifDianMarcas"];
+  const COLECCIONES = ["config", "meses", "impuestos", "terceros", "declaraciones", "conciliaciones", "concLibro", "concBanco", "concPasarela", "proveedores", "provAcuerdos", "verifDian", "verifDianMarcas", "auxiliar", "auxiliarPartes"];
   function envolverFirestore(fs) {
     return {
       async exportar() {
