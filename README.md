@@ -6,6 +6,22 @@ Aplicación web para generar, a partir del Libro de Inventario / Balance de prue
 
 En **Verificación DIAN → Resumen y carga de archivos** se sueltan juntos el reporte de documentos electrónicos de la DIAN (Excel, emitidos y recibidos) y el **Libro Auxiliar por Nit** de MantisWeb del mismo período. La app verifica que cada factura de venta, nota, documento soporte y factura de proveedor esté registrada con el mismo valor, IVA, tercero y mes; lista lo que falta por registrar y lo que está en el software sin soporte en la DIAN, y exporta todo a Excel. El primer cruce puede ser acumulado (enero a septiembre); luego se hace mes a mes y los pendientes se arrastran solos. El libro se procesa en el navegador; en la base de datos solo se guardan el resumen y las novedades.
 
+## Balances de años cerrados
+
+En **Datos → Cargar archivos** también se puede cargar el balance por tercero (**FunBalanceTotalNit**, Libro de Inventario por Nit) de un año completo, del 1 de enero al 31 de diciembre. Si ese mes todavía no tiene balance en el histórico, se guardan los totales de cada cuenta como balance del período (para ESF, ERI, ECP, EFE, indicadores y notas) y el detalle por tercero para Cartera y proveedores. Si el mes ya tiene su balance con centros de costo, el archivo solo alimenta la cartera, como antes. Este archivo no trae centros de costo, así que los informes por sede de esos períodos quedan sin datos.
+
+## Consulta del libro auxiliar
+
+En **Consulta de movimientos** se carga el **Libro Auxiliar por Cta** de MantisWeb (todas las cuentas, en Excel), un archivo por año o varios (por meses o trimestres). Permite:
+
+- **Movimientos por cuenta:** filtrar por cuenta, tercero, tipo y número de comprobante, fechas, texto o valor; ver el saldo corrido de una cuenta; agrupar por cuenta, tercero, tipo o mes; exportar a Excel.
+- **Comprobantes:** cada comprobante completo con todas sus líneas y si cuadra (débitos = créditos).
+- **Cuadre con el balance:** partida doble del año, comprobantes descuadrados y comparación cuenta por cuenta (saldo inicial, débitos, créditos y saldo final) contra el balance de prueba cargado en el histórico.
+
+El Excel se lee en el navegador por partes (aguanta libros de cientos de miles de movimientos) y se guarda comprimido en las colecciones `auxiliar` (resumen de cada archivo) y `auxiliarPartes` (el libro en trozos de menos de 1 MB). Cada año se descarga solo cuando se consulta.
+
+> **Fechas en el Excel de MantisWeb:** cuando el libro pasa de unos 34.000 movimientos, el Excel deja vacía la columna Fecha del resto (se le acaban los formatos de celda permitidos). La app completa esas fechas con la de otra línea del mismo comprobante (exacta) y, si el comprobante no tiene ninguna, con la fecha de creación del registro (aproximada, marcada con ≈). Los saldos y totales no se afectan. Para tener todas las fechas exactas, exporte el año por meses y cargue los archivos juntos.
+
 Es un sitio estático: un solo `index.html` que se ejecuta completo en el navegador. Los archivos contables se procesan en el equipo de quien los carga; no se suben al repositorio.
 
 ## Publicar en GitHub Pages
