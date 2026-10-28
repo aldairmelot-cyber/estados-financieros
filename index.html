@@ -10110,7 +10110,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       const dec = X.R(renglon);
       if (ajustes.length) aoa.push(fila("Total después de ajustes", neto));
       aoa.push(fila(`Valor declarado renglón ${renglon}`, dec));
-      if (dec != null) aoa.push(fila(Math.abs(dec - neto) < 1000 ? "Diferencia (redondeo de la declaración a miles)" : "Diferencia por explicar (complete con la conciliación fiscal, formato 2516)", dec - neto));
+      if (dec != null) aoa.push(fila(Math.abs(dec - neto) < 1000 ? "Diferencia (redondeo de la declaración a miles)" : "Diferencia", dec - neto));
       return { total, neto, declarado: dec, dif: dec == null ? null : dec - neto, renglon };
     }
     return { total, neto };
@@ -10268,15 +10268,15 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         m.base += r[F_BASE]; m.v += r[F_D] - r[F_C]; M.set(k, m);
       }
       const xs = [...M.values()].filter((m) => Math.abs(m.v) >= 0.5).sort((a, b) => a.nit.localeCompare(b.nit, "es", { numeric: true }) || a.conc.localeCompare(b.conc));
-      const aoa = [["NIT del agente retenedor", "DV", "Nombre o razón social", "Concepto", "Base", "Valor retenido", "Certificado"]];
+      const aoa = [["NIT del agente retenedor", "DV", "Nombre o razón social", "Concepto", "Base", "Valor retenido"]];
       const libroNit = new Map(); for (const m of xs) libroNit.set(m.nit, (libroNit.get(m.nit) || 0) + m.v);
       const cruce = cruceCertRQ(X, libroNit);
       let total = 0;
-      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), !cruce ? "POR ADJUNTAR" : cruce.sinCert.some((f) => f.n === m.nit) ? "POR ADJUNTAR" : "ADJUNTO"]); total += m.v; }
+      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v)]); total += m.v; }
       const resumen = cierreRQ(aoa, total, [], X, 106, 5);
       // El cruce con los certificados es de uso interno: no va en el anexo; solo alimenta la lista de pendientes del ZIP.
       const interno = cruce ? { certFaltan: cruce.sinCert, certDif: cruce.conDif, certSinLibro: cruce.sinLibro } : {};
-      return [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, ...interno, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.` } }];
+      return [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16], resumen: { ...resumen, ...interno, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.` } }];
     },
     certificados(X) {
       const M = new Map();
@@ -10330,7 +10330,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       ...filas.map(([n, m]) => [n, dvNit(n), X.nom(n) || L.nits[n] || "", r2a(m.renta), r2a(m.base), r2a(m.iva), r2a(m.ica)]),
       [], ["", "", "Total", r2a(tot.renta), r2a(tot.base), r2a(tot.iva), r2a(tot.ica)]];
     const dec = X.R(106);
-    if (dec != null) aoa.push(["", "", "Otras retenciones declaradas (renglón 106)", dec], ["", "", Math.abs(dec - tot.renta) < 1000 ? "Diferencia (redondeo)" : "Diferencia por explicar", r2a(dec - tot.renta)]);
+    if (dec != null) aoa.push(["", "", "Otras retenciones declaradas (renglón 106)", dec], ["", "", Math.abs(dec - tot.renta) < 1000 ? "Diferencia (redondeo)" : "Diferencia", r2a(dec - tot.renta)]);
     return { filas, tot, aoa };
   }
 
