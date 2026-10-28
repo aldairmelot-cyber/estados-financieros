@@ -3715,7 +3715,18 @@ const VerifDian = (() => {
     }
     const porNit = new Map();
     for (const c of comp.values()) for (const k of c.nits.keys()) { let a = porNit.get(k); if (!a) porNit.set(k, (a = [])); a.push(c.num); }
-    return { comp, porFac, porNit, fa, fd, nn };
+    // factura citada sin importar el NIT de la línea: "FE39" y "#39" (fletes registrados
+    // dentro de la factura de compra del producto, con el NIT del proveedor)
+    const facSolo = new Map();
+    for (let i = 0; i < n; i++) {
+      if (!fa[i]) continue;
+      for (const key of [fa[i], fd[i] && fd[i].length >= 3 ? "#" + fd[i] : null]) {
+        if (!key) continue;
+        let s = facSolo.get(key); if (!s) facSolo.set(key, (s = new Set()));
+        s.add(L.num[i]);
+      }
+    }
+    return { comp, porFac, porNit, facSolo, fa, fd, nn };
   }
 
   // Valor de compra de un comprobante: base (costo, gasto, inventario, activo) + IVA descontable.
@@ -3819,10 +3830,72 @@ const VerifDian = (() => {
       return Math.abs(b.total - x.tot) + Math.abs(b.iva - x.iva) < Math.abs(a.total - x.tot) + Math.abs(a.iva - x.iva) ? b : a;
     };
 
-    const sinMatch = [];
+    /* Fletes: la factura de la transportadora se registra dentro del comprobante de la
+       factura de compra, como mayor valor del inventario (débito a la 14). El débito a la
+       14 puede ir con el NIT del proveedor del producto y sin citar la factura del flete;
+       lo que sí la identifica es la cuenta por pagar (y sus retenciones) a la transportadora,
+       o las líneas que citan su número. Se toma el valor de esas líneas. */
+    const esPasivo = (c) => /^2[234]/.test(c) && !c.startsWith("2408");
+    const valorFlete = (n, x) => {
+      const comp = I.comp.get(n);
+      if (!comp || !comp.lin.some((i) => L.cta[i].startsWith("14") && L.deb[i] - L.cred[i] > 0.5)) return null;
+      const dg = digitos(x.folio), af = alnum(x.folio);
+      const cita = (i) => I.fa[i] && (I.fa[i] === x.doc || I.fa[i] === af || (dg && dg.length >= 2 && I.fd[i] === dg));
+      const lin = comp.lin.filter((i) => cita(i) || I.nn[i] === x.nit);
+      if (!lin.length) return null;
+      let pas = 0, iva = 0, costo = 0, inv = 0;
+      for (const i of lin) {
+        const c = L.cta[i], v = L.deb[i] - L.cred[i];
+        if (c.startsWith("2408")) iva += v;
+        else if (esPasivo(c)) pas -= v;
+        else if (esBase(c)) { costo += v; if (c.startsWith("14")) inv += v; }
+      }
+      pas = r2(pas); iva = r2(iva);
+      const porCosto = r2(costo + iva);
+      // valor: el del lado del costo (si las líneas de la 14 citan el flete) o el de la cuenta por pagar
+      const total = Math.abs(porCosto - x.tot) <= Math.abs(pas - x.tot) ? porCosto : pas;
+      const margen = Math.max(tol, Math.abs(x.tot) * 0.005);
+      // si el costo de sus líneas supera la factura, es la compra del producto que lleva el flete encima
+      const tipo = total === pas && porCosto > x.tot + margen ? "conFlete" : "flete";
+      if (Math.abs(total - x.tot) <= margen) return { n, f: comp.f, total, iva, activo: 0, inv: r2(inv), neto: false, tipo };
+      // cuenta por pagar neta de retenciones registradas sin el NIT ni el número del flete (hasta 6 %)
+      if (x.tot > 0 && pas > 0.5 && pas < x.tot && pas >= x.tot * 0.94) return { n, f: comp.f, total: x.tot, iva: r2(x.iva), activo: 0, inv: r2(inv), neto: true, pas, tipo };
+      return null;
+    };
+    const buscarFlete = (x, nums = []) => {
+      const cand = new Map(); // número → exige fecha cercana
+      for (const n of nums) cand.set(n, false);
+      const dg = digitos(x.folio);
+      for (const k of [x.doc, alnum(x.folio), dg && dg.length >= 3 ? "#" + dg : null]) {
+        if (!k) continue;
+        for (const n of I.facSolo.get(k) || []) if (!cand.has(n)) cand.set(n, true);
+      }
+      for (const n of I.porNit.get(x.nit) || []) if (!cand.has(n)) cand.set(n, true);
+      let mejor = null;
+      for (const [n, cerca] of cand) {
+        const c = I.comp.get(n); if (!c) continue;
+        const dd = dias(x.f, c.f);
+        if (cerca && (dd < -15 || dd > 120)) continue;
+        const v = valorFlete(n, x); if (!v) continue;
+        const err = Math.abs(v.total - x.tot) + (v.neto ? x.tot : 0);
+        if (!mejor || err < mejor.err || (err === mejor.err && Math.abs(dd) < Math.abs(mejor.dd))) mejor = { ...v, dd, err };
+      }
+      return mejor;
+    };
+    const asignarFlete = (fila, v) => {
+      fila.obs = fila.obs.filter((o) => o !== "pago" && o !== "numero");
+      Object.assign(fila, { num: v.n, fL: v.f, Ltot: v.total, Liva: v.iva }, clasif(fila, v.total, v.iva, 0));
+      fila.obs.push(v.tipo || "flete");
+      if (v.neto) { fila.obs.push("fleteNeto"); fila.Lpas = v.pas; }
+      if (mesDe(v.f) !== mesDe(fila.f)) fila.obs.push("mes");
+      if (regAnt.has(`${fila.nit}|${fila.doc}`)) fila.obs.push("dupAnt");
+      (usado.get(v.n) || usado.set(v.n, []).get(v.n)).push(fila);
+    };
+
+    const sinMatch = [], numsDe = new Map();
     for (const { x, nums, como } of candidatos) {
       const fila = { ...x, k: x.cufe ? x.cufe.slice(0, 24) : `${x.nit}|${x.doc}`, num: "", fL: "", Ltot: 0, Liva: 0, est: "falta", obs: [] };
-      filas.push(fila);
+      filas.push(fila); numsDe.set(fila, nums);
       if (!nums.length) { sinMatch.push(fila); continue; }
       const sg = negativo(x.tc) ? -1 : 1;
       const vals = nums.map((n) => ({ n, f: I.comp.get(n).f, ...valorDoc(n, x) }))
@@ -3843,8 +3916,23 @@ const VerifDian = (() => {
       for (const v of vals) if (sg * v.total > 0.5) (usado.get(v.n) || usado.set(v.n, []).get(v.n)).push(fila);
     }
 
+    // ---- fletes registrados en la factura de compra como mayor valor del inventario (14)
+    for (const fila of filas) {
+      if (fila.g !== "C" || fila.ds || !numsDe.has(fila)) continue;
+      if (fila.est !== "falta" && fila.est !== "sinc" && fila.est !== "dif") continue;
+      const v = buscarFlete(fila, numsDe.get(fila));
+      if (!v) continue;
+      if (fila.est === "dif") {
+        // ya estaba cruzada con diferencia: solo se cambia si el flete cuadra
+        if (v.neto || Math.abs(v.total - fila.tot) >= Math.abs(fila.Ltot - fila.tot)) continue;
+        fila.obs = fila.obs.filter((o) => o !== "tot" && o !== "iva" && o !== "ivaCosto" && o !== "dup" && o !== "mes" && o !== "dupAnt");
+      }
+      asignarFlete(fila, v);
+    }
+
     // ---- facturas que no citan número: mismo proveedor, mismo valor, fecha cercana
     for (const fila of sinMatch) {
+      if (fila.obs.includes("flete") || fila.obs.includes("conFlete")) continue;
       const nums = (I.porNit.get(fila.nit) || []).filter((n) => !usado.has(n));
       let mejor = null;
       for (const n of nums) {
@@ -3887,7 +3975,18 @@ const VerifDian = (() => {
         const sg = negativo(p.tc) ? -1 : 1;
         const vals = nums.map((n) => { const c = I.comp.get(n); return p.g === "V" ? { n, f: c.f, total: r2(c.ing + c.iva + c.inc), iva: r2(c.iva) } : { n, f: c.f, ...valorCompra(L, I, c.lin) }; })
           .filter((v) => sg * v.total > 0.5).sort((a, b) => sg * b.total - sg * a.total);
-        if (vals.length) {
+        // fletes: si no aparece o el valor no cuadra, se busca como mayor valor del inventario
+        const esCompra = p.g === "C" && !p.ds;
+        let fl = null;
+        if (esCompra && (!vals.length || Math.abs(vals[0].total - p.tot) > tol)) {
+          fl = buscarFlete({ ...p, folio: p.folio || p.doc }, nums);
+          if (fl && vals.length && fl.neto) fl = null;
+        }
+        if (fl) {
+          const r = { ...p, obs: [] };
+          asignarFlete(r, fl);
+          regularizadas.push(r);
+        } else if (vals.length) {
           const v = vals[0];
           const r = { ...p, num: v.n, fL: v.f, Ltot: v.total, Liva: v.iva, ...clasif(p, v.total, v.iva, v.activo) };
           regularizadas.push(r);
@@ -7938,8 +8037,9 @@ const VerifDian = (() => {
     tot: ["Valor distinto", "error"], iva: ["IVA distinto", "error"], ivaCosto: ["IVA no descontado", "advertencia"], ivaActivo: ["IVA mayor valor del activo", "ok"], nit: ["Tercero distinto", "advertencia"],
     mes: ["Registrada en otro mes", "info"], dup: ["Posible doble registro", "error"], dupAnt: ["Registrada en un período anterior", "error"],
     aprox: ["Sin número de factura en el libro", "info"], numero: ["Número de factura incompleto", "info"], pago: ["Solo pagos o anticipos", "advertencia"],
+    flete: ["Flete: mayor valor del inventario (14)", "ok"], conFlete: ["La 14 incluye el flete de la transportadora", "ok"], fleteNeto: ["Flete: cuenta por pagar neta de retenciones", "info"],
   };
-  const FILTROS_DIF = [["", "Todas"], ["valor", "Valor o IVA"], ["ivaCosto", "IVA no descontado"], ["ivaActivo", "Activos fijos"], ["red", "Redondeo"], ["nit", "Tercero"], ["mes", "Otro mes"], ["dup", "Doble registro"], ["aprox", "Sin número"]];
+  const FILTROS_DIF = [["", "Todas"], ["valor", "Valor o IVA"], ["ivaCosto", "IVA no descontado"], ["ivaActivo", "Activos fijos"], ["red", "Redondeo"], ["nit", "Tercero"], ["mes", "Otro mes"], ["dup", "Doble registro"], ["aprox", "Sin número"], ["flete", "Fletes"]];
   const MARCAS_DN = [["", "Pendiente"], ["proximo", "Se registra el próximo mes"], ["rechazada", "Rechazada / reclamada al proveedor"], ["noaplica", "No es de la empresa"], ["revisado", "Revisado: no requiere registro"]];
   const JUSTIFICA = new Set(["rechazada", "noaplica", "revisado"]);
   const justificada = (f) => JUSTIFICA.has(DN.marcas[f.k]?.e);
@@ -8157,6 +8257,8 @@ const VerifDian = (() => {
     if (ivaCosto) H.push(["advertencia", `${n(ivaCosto)} facturas con IVA que se registraron sin IVA descontable (llevado al costo o al gasto).`, ir("diferencias")]);
     const ivaAct = (X.novedades || []).filter((f) => (f.obs || []).includes("ivaActivo"));
     if (ivaAct.length) H.push(["ok", `${n(ivaAct.length)} compras de activos fijos con el IVA como mayor valor del activo ($ ${fmt(ivaAct.reduce((s, f) => s + (f.dI || 0), 0))}): cuadran.`, ir("diferencias")]);
+    const fletes = (X.novedades || []).filter((f) => (f.obs || []).includes("flete"));
+    if (fletes.length) H.push(["ok", `${n(fletes.length)} facturas de transporte están registradas en la factura de compra como mayor valor del inventario (14): $ ${fmt(fletes.reduce((s, f) => s + (f.tot || 0), 0))}.`, ir("diferencias")]);
     if (C.dup) H.push(["error", `${n(C.dup)} facturas de compra con posible doble registro.`, ir("diferencias")]);
     if (C.mes) H.push(["info", `${n(C.mes)} compras registradas en un mes distinto a la fecha de la factura: revise el período del IVA descontable.`, ir("diferencias")]);
     if (C.aprox) H.push(["info", `${n(C.aprox)} compras están en el libro sin el número de la factura; se cruzaron por proveedor, valor y fecha.`, ir("diferencias")]);
@@ -8277,6 +8379,7 @@ const VerifDian = (() => {
       case "mes": return o.includes("mes");
       case "dup": return o.includes("dup") || o.includes("dupAnt");
       case "aprox": return o.includes("aprox") || o.includes("numero");
+      case "flete": return o.includes("flete") || o.includes("conFlete");
       default: return true;
     }
   }
@@ -8287,7 +8390,7 @@ const VerifDian = (() => {
     let html = cabeceraDN(X, "Diferencias entre la DIAN y el software", `Documentos que sí están registrados pero con alguna novedad. Diferencia: más de $ ${fmt(X.tol)} en el total o en el IVA. Redondeo: entre $ 1 y $ ${fmt(X.tol)}.`);
     html += `<section class="panel">${filtrosDN(X)}<div class="seg dn-seg" role="group" aria-label="Tipo de novedad" style="margin-top:10px">${FILTROS_DIF.map(([k, t]) => `<button data-dndif="${k}" aria-pressed="${DN.fDif === k}">${esc(t)}<span class="chip gris">${fmt(cuenta[k])}</span></button>`).join("")}</div></section>`;
     html += `<section class="panel">${tablaDocsDN(xs, { libro: true, estado: true, grupo: true, limite: DN.limite, vacio: "No hay documentos con esta novedad." })}
-      <p class="pie">«IVA no descontado»: la factura trae IVA y en el libro no se llevó a la cuenta 2408 (quedó en el costo o el gasto). «Sin número de factura en el libro»: el comprobante no cita el número; se cruzó por proveedor, valor y fecha. «Registrada en otro mes»: afecta el período en que se toma el IVA.</p></section>`;
+      <p class="pie">«IVA no descontado»: la factura trae IVA y en el libro no se llevó a la cuenta 2408 (quedó en el costo o el gasto). «Sin número de factura en el libro»: el comprobante no cita el número; se cruzó por proveedor, valor y fecha. «Registrada en otro mes»: afecta el período en que se toma el IVA. «Flete»: la factura de la transportadora quedó en el comprobante de la factura de compra, cargada a la 14 como mayor valor del producto; se identificó por la cuenta por pagar a la transportadora o por las líneas que citan su número.</p></section>`;
     return html;
   }
 
