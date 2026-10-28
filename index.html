@@ -444,6 +444,7 @@ table.cq small.neg, .lista small.neg { color: var(--error); display: block; }
 <input type="file" id="archivo-rt" accept=".pdf" multiple hidden>
 <input type="file" id="archivo-rq" accept=".pdf" hidden>
 <input type="file" id="archivo-rq-nuevo" accept=".pdf" multiple hidden>
+<input type="file" id="archivo-crt" accept=".xlsx,.xls" multiple hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -9897,6 +9898,126 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
      Colecciones: requerimientos (datos y numerales) y requerimientosPdf (el PDF recibido). */
   const RQ = { docs: new Map(), sel: null, nuevo: null, ocupado: "", error: "", confirmar: null, h: null };
   S.rq = RQ;
+  /* ---------- Certificados de retención recibidos de los agentes retenedores (colección certRetencion, un documento por año).
+     Se cargan desde un Excel con una fila por concepto de cada certificado y se cruzan por NIT con el libro auxiliar (1355). */
+  const CRT = { docs: new Map(), ocupado: "", confirmar: null };
+  S.crt = CRT;
+  const TIPOS_CRT = { renta: "Renta", iva: "IVA", ica: "ICA", otros: "Estampillas y tasas" };
+  const normCRT = (t) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  /** NIT de 9 dígitos sin dígito de verificación (como lo trae el libro auxiliar). */
+  function nitCRT(v) {
+    let d = String(v ?? "").split("-")[0].replace(/\D/g, "");
+    if (d.length === 10 && String(dvNit(d.slice(0, 9))) === d.slice(9)) d = d.slice(0, 9);
+    return d;
+  }
+  function numCRT(v) {
+    if (typeof v === "number") return v;
+    let t = String(v ?? "").replace(/[$\s]/g, "");
+    if (!t) return null;
+    const neg = /^\(.*\)$/.test(t) || t.startsWith("-"); t = t.replace(/[()\-]/g, "");
+    if (/,\d{1,2}$/.test(t)) t = t.replace(/\./g, "").replace(",", ".");
+    else t = t.replace(/,/g, "");
+    const n = Number(t); return Number.isFinite(n) ? (neg ? -n : n) : null;
+  }
+  function tipoCRT(v) {
+    const t = normCRT(v);
+    if (!t || /renta|fuente|compra/.test(t)) return "renta";
+    if (/iva/.test(t)) return "iva";
+    if (/ica|industria/.test(t)) return "ica";
+    if (/estampilla|tasa|otro/.test(t)) return "otros";
+    return "renta";
+  }
+  /** Lee el Excel de certificados: busca la fila de títulos (NIT y valor retenido) en cualquier hoja. */
+  function filasCRT(wb, nombre) {
+    const COLS = { anio: /^ano( gravable)?$|^vigencia$|^periodo/, nit: /^nit|identificacion/, agente: /agente|retenedor|razon social|nombre/, tipo: /^tipo/, concepto: /concepto/, base: /^base/, valor: /valor retenido|^valor$|^retencion$|valor retencion|importe/, ciudad: /ciudad/, fecha: /fecha/, obs: /observ|novedad|nota/ };
+    for (const sn of wb.SheetNames) {
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: "" });
+      for (let i = 0; i < Math.min(aoa.length, 15); i++) {
+        const h = aoa[i].map(normCRT), col = {};
+        for (const [k, re] of Object.entries(COLS)) { const j = h.findIndex((x, jj) => x && re.test(x) && !Object.values(col).includes(jj)); if (j >= 0) col[k] = j; }
+        if (col.nit == null || col.valor == null) continue;
+        const out = [];
+        for (const r of aoa.slice(i + 1)) {
+          const nit = nitCRT(r[col.nit]), valor = numCRT(r[col.valor]);
+          if (!nit || valor == null) continue;
+          const anio = col.anio != null ? Number(String(r[col.anio]).replace(/\D/g, "").slice(0, 4)) : null;
+          out.push({ anio, nit, agente: String(r[col.agente] ?? "").trim(), tipo: tipoCRT(col.tipo != null ? r[col.tipo] : ""), concepto: String(r[col.concepto] ?? "").trim(),
+            base: col.base != null ? numCRT(r[col.base]) : null, valor, ciudad: String(r[col.ciudad] ?? "").trim(), fecha: r[col.fecha] instanceof Date ? r[col.fecha].toISOString().slice(0, 10) : String(r[col.fecha] ?? "").trim(), obs: String(r[col.obs] ?? "").trim() });
+        }
+        return out;
+      }
+    }
+    throw new Error(`${nombre}: no encontré una hoja con las columnas NIT y Valor retenido.`);
+  }
+  async function leerCertificadosRet(files) {
+    try {
+      CRT.ocupado = "Leyendo los certificados…"; render();
+      await asegurarLibreria("XLSX", URLS_XLSX);
+      if (!window.XLSX) throw new Error("No se pudo cargar el lector de Excel. Recargue la página e intente de nuevo.");
+      const porAnio = new Map(); let sinAnio = 0;
+      for (const f of files) {
+        const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true });
+        for (const r of filasCRT(wb, f.name)) {
+          if (!r.anio || r.anio < 2000) { sinAnio++; continue; }
+          if (!porAnio.has(r.anio)) porAnio.set(r.anio, { archivo: f.name, filas: [] });
+          porAnio.get(r.anio).filas.push(r);
+        }
+      }
+      if (!porAnio.size) throw new Error("el archivo no trae filas con año, NIT y valor retenido.");
+      const msg = [];
+      for (const [anio, d] of [...porAnio].sort((a, b) => a[0] - b[0])) {
+        const doc = { anio, archivo: d.archivo, cargado: new Date().toISOString(), filas: d.filas.map(({ anio: _a, ...x }) => x) };
+        if (S.db) await S.db.doc(`certRetencion/${anio}`).set(clon(doc));
+        CRT.docs.set(anio, doc);
+        msg.push(`${anio}: ${new Set(doc.filas.map((x) => x.nit)).size} agentes`);
+      }
+      toast(`Certificados cargados (${msg.join(" · ")})${sinAnio ? `; ${sinAnio} filas sin año no se tomaron` : ""}. Cada año cargado reemplaza el anterior.`);
+    } catch (err) { console.error(err); toast(`No se pudieron cargar los certificados: ${err.message}`); }
+    CRT.ocupado = ""; render();
+  }
+  async function borrarCertificadosRet(anio) {
+    try { if (S.db) await S.db.doc(`certRetencion/${anio}`).delete(); CRT.docs.delete(anio); CRT.confirmar = null; toast(`Certificados de ${anio} eliminados.`); }
+    catch (err) { toast(`No se pudo eliminar: ${err.message || err.code}`); }
+    render();
+  }
+  /** Certificados del año agrupados por NIT y tipo. */
+  function certPorNit(y) {
+    const d = CRT.docs.get(Number(y)); if (!d) return null;
+    const M = new Map();
+    for (const r of d.filas) {
+      const m = M.get(r.nit) || { agente: r.agente, renta: 0, base: 0, iva: 0, ica: 0, otros: 0, obs: [] };
+      m[r.tipo] += Number(r.valor) || 0; if (r.tipo === "renta") m.base += Number(r.base) || 0;
+      if (r.obs && !m.obs.includes(r.obs)) m.obs.push(r.obs);
+      M.set(r.nit, m);
+    }
+    return M;
+  }
+  /** Hoja de cruce: retención en la fuente (renta) del libro auxiliar contra los certificados recibidos, por NIT. */
+  function cruceCertRQ(X, libroNit) {
+    const C = certPorNit(X.y); if (!C) return null;
+    const nits = new Set([...libroNit.keys(), ...[...C].filter(([, m]) => Math.abs(m.renta) >= 0.5).map(([n]) => n)]);
+    const filas = [...nits].map((n) => {
+      const lib = libroNit.get(n) || 0, c = C.get(n), cer = c ? c.renta : 0, tiene = Boolean(c && Math.abs(c.renta) >= 0.5), dif = cer - lib;
+      const estado = !tiene ? "SIN CERTIFICADO – SOLICITAR" : Math.abs(lib) < 0.5 ? "Certificado sin registro en libros" : Math.abs(dif) < 1000 ? "Cuadra" : "Diferencia por revisar";
+      return { n, nombre: X.nom(n) || X.libro?.nits?.[n] || c?.agente || "", lib, cer, dif, estado, obs: c ? c.obs.join(" · ") : "", tiene };
+    }).sort((a, b) => (a.estado === "Cuadra") - (b.estado === "Cuadra") || Math.abs(b.dif) - Math.abs(a.dif));
+    const aoa = [["NIT del agente retenedor", "DV", "Nombre o razón social", "Retención según libro auxiliar", "Retención según certificado", "Diferencia (certificado − libro)", "Estado", "Observación del certificado"]];
+    const tot = { lib: 0, cer: 0 };
+    for (const f of filas) { aoa.push([f.n, dvNit(f.n), f.nombre, r2a(f.lib), r2a(f.cer), r2a(f.dif), f.estado, f.obs]); tot.lib += f.lib; tot.cer += f.cer; }
+    aoa.push([], ["", "", "Totales", r2a(tot.lib), r2a(tot.cer), r2a(tot.cer - tot.lib)]);
+    const dec = X.R(106);
+    if (dec != null) aoa.push(["", "", "Otras retenciones declaradas (renglón 106)", "", r2a(dec), r2a(dec - tot.cer), Math.abs(dec - tot.cer) < 1000 ? "Cuadra con los certificados" : "Diferencia declarado − certificados"]);
+    const sinCert = filas.filter((f) => !f.tiene && Math.abs(f.lib) >= 0.5), conDif = filas.filter((f) => f.estado === "Diferencia por revisar"), sinLibro = filas.filter((f) => f.estado === "Certificado sin registro en libros");
+    const cuenta = (xs) => fmt(xs.length);
+    aoa.push([], [`Solo cuenta la retención a título de renta. Los certificados de IVA, ICA y estampillas quedan cargados pero no entran en el renglón 106. Diferencias menores a $1.000 se consideran redondeo.`]);
+    const otros = [...C].filter(([, m]) => Math.abs(m.iva) + Math.abs(m.ica) + Math.abs(m.otros) >= 0.5);
+    if (otros.length) {
+      aoa.push([], ["Otros conceptos certificados (no van al renglón 106)"], ["NIT", "DV", "Agente", "Retención de IVA", "Retención de ICA", "Estampillas y tasas"]);
+      for (const [n, m] of otros) aoa.push([n, dvNit(n), X.nom(n) || m.agente, r2a(m.iva), r2a(m.ica), r2a(m.otros)]);
+    }
+    return { sinCert, conDif, sinLibro, tot, hoja: { nombre: "Cruce certificados", titulo: `Retención en la fuente ${X.y}: libro auxiliar contra certificados recibidos, por agente retenedor`, aoa, anchos: [13, 4, 44, 18, 18, 18, 30, 60],
+      resumen: { texto: `${cuenta(filas.filter((f) => f.tiene))} agentes con certificado, ${cuenta(sinCert)} por solicitar, ${cuenta(conDif)} con diferencia y ${cuenta(sinLibro)} certificados sin registro en libros.`, certFaltan: sinCert, certDif: conDif, certSinLibro: sinLibro } } };
+  }
   const MODELO_RQ = [
     ["eeff", "Estados financieros firmados por representante legal y revisor fiscal y/o contador."],
     ["mayor", "Copia escaneada del libro mayor y balances a diciembre 31 de {anio}."],
@@ -10148,12 +10269,16 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       }
       const xs = [...M.values()].filter((m) => Math.abs(m.v) >= 0.5).sort((a, b) => a.nit.localeCompare(b.nit, "es", { numeric: true }) || a.conc.localeCompare(b.conc));
       const aoa = [["NIT del agente retenedor", "DV", "Nombre o razón social", "Concepto", "Base", "Valor retenido", "Certificado"]];
+      const libroNit = new Map(); for (const m of xs) libroNit.set(m.nit, (libroNit.get(m.nit) || 0) + m.v);
+      const cruce = cruceCertRQ(X, libroNit);
       let total = 0;
-      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), "POR ADJUNTAR"]); total += m.v; }
+      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), !cruce ? "POR ADJUNTAR" : cruce.sinCert.some((f) => f.n === m.nit) ? "POR SOLICITAR" : "ADJUNTO"]); total += m.v; }
       const resumen = cierreRQ(aoa, total, [], X, 106, 5);
       aoa.push([], ["Movimientos de la cuenta no incluidos en la relación:"], ["", "", "", "Notas de contabilidad (liquidación de autorretención y aplicación a la declaración)", "", r2a(nota)]);
       if (propio) aoa.push(["", "", "", "Movimientos con el NIT de la propia empresa o con la DIAN", "", r2a(propio)]);
-      return [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.` } }];
+      const hojas = [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.${cruce ? ` ${cruce.hoja.resumen.texto}` : " Sin certificados cargados para el cruce."}` } }];
+      if (cruce) hojas.push(cruce.hoja);
+      return hojas;
     },
     certificados(X) {
       const M = new Map();
@@ -10377,7 +10502,15 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         if (it.tipo === "costos" && hs.length) { for (const h of hs) add(nombreRenglonRQ(q, it, h.resumen.renglon), libroRQ(q, [h], false)); hechos.push(it.n); }
         else if (hs.length) { add(nom("xlsx"), libroRQ(q, hs, false)); hechos.push(it.n); }
         if (it.tipo === "costos" || it.tipo === "retenciones" || it.tipo === "pasivos") for (const h of hs) if (h.resumen?.dif != null && Math.abs(h.resumen.dif) >= 1000) faltan.push(`${it.n}. ${h.nombre}: explicar la diferencia de $ ${fmt(h.resumen.dif)} frente al renglón ${h.resumen.renglon || ""} declarado (conciliación fiscal, formato 2516).`);
-        if (it.tipo === "retenciones") faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista.`);
+        if (it.tipo === "retenciones") {
+          const cr = hs.find((h) => h.resumen?.certFaltan)?.resumen;
+          if (!cr) faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista (cárguelos en Requerimientos DIAN → Certificados de retención para cruzarlos).`);
+          else {
+            faltan.push(`${it.n}. Adjuntar los certificados de retención recibidos (escaneados) de los agentes de la hoja «Cruce certificados».`);
+            if (cr.certFaltan.length) faltan.push(`${it.n}. Solicitar el certificado a ${fmt(cr.certFaltan.length)} agentes: ${cr.certFaltan.map((f) => `${f.nombre || f.n} (${nitDV(f.n)}) $ ${fmt(f.lib)}`).join("; ")}.`);
+            if (cr.certDif.length) faltan.push(`${it.n}. Revisar ${fmt(cr.certDif.length)} agentes cuyo certificado no coincide con el libro: ${cr.certDif.map((f) => `${f.nombre || f.n} (dif. $ ${fmt(f.dif)})`).join("; ")}.`);
+          }
+        }
         if (it.tipo === "certificados") faltan.push(`${it.n}. Pedir y adjuntar el certificado tributario anual de cada entidad de ${nom("xlsx")}.`);
         if (it.tipo === "cambio") faltan.push(`${it.n}. Hay movimiento en cuentas de diferencia en cambio: completar el cuadro con facturas, TRM y pagos, y adjuntar los soportes.`);
         if (it.tipo === "otro") faltan.push(`${it.n}. ${textoItem(it, q)}`);
@@ -10693,11 +10826,24 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       ${qs.length ? `<div class="tabla-env" style="margin-top:12px"><table class="lista"><thead><tr><th>Número</th><th>Impuesto y año</th><th>Fecha</th><th>Plazo</th><th>Avance</th><th></th></tr></thead><tbody>
         ${qs.map((q) => { const ok = q.items.filter((it) => it.estado === "listo" || it.estado === "noaplica").length; return `<tr${RQ.sel === q.numero ? ' style="background:var(--acento-suave)"' : ""}><td><b>${esc(q.numero)}</b><br><small>Exp. ${esc(q.expediente || "—")}</small></td><td>${esc(q.impuesto)}<br><small>Año gravable ${q.anio}</small></td><td>${esc(fechaC(q.fecha || ""))}</td><td>${chipVence(q)}</td><td>${ok} de ${q.items.length} numerales listos</td>
           <td class="num"><button class="btn chico" data-rq="abrir" data-id="${esc(q.numero)}">Abrir</button></td></tr>`; }).join("")}</tbody></table></div>` : ""}</section>`;
+    html += panelCertificadosRet();
     if (RQ.nuevo) html += formNuevoRQ();
     const q = RQ.docs.get(RQ.sel);
     if (q) html += detalleRQ(q);
     else if (!qs.length && !RQ.nuevo) html += `<section class="panel"><p class="vacio">Todavía no hay requerimientos registrados.</p></section>`;
     return html;
+  }
+  function panelCertificadosRet() {
+    const ds = [...CRT.docs.values()].sort((a, b) => b.anio - a.anio);
+    const suma = (d, t) => d.filas.filter((r) => r.tipo === t).reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    return `<section class="panel"><h2>Certificados de retención recibidos</h2>
+      <p class="sub" style="margin:0">Cargue el Excel con los certificados que enviaron los agentes retenedores (una fila por concepto: año, NIT, agente, tipo, concepto, base y valor retenido). En el anexo del renglón 106 se cruzan por NIT con el libro auxiliar: quién no ha enviado certificado, cuáles no coinciden y cuáles no están registrados.</p>
+      ${CRT.ocupado ? `<div class="aviso info" style="margin-top:10px"><p><span class="girando" aria-hidden="true"></span>${esc(CRT.ocupado)}</p></div>` : ""}
+      <div class="zona" id="zona-crt" tabindex="0" role="button" aria-label="Cargar el Excel de certificados de retención" style="margin-top:12px;padding:14px"><b>Arrastre aquí el Excel de certificados o haga clic para buscarlo</b><span>Puede traer varios años; cada año cargado reemplaza los certificados que había de ese año.</span></div>
+      ${ds.length ? `<div class="tabla-env" style="margin-top:12px"><table class="lista"><thead><tr><th>Año</th><th class="num">Agentes</th><th class="num">Renta</th><th class="num">IVA</th><th class="num">ICA</th><th class="num">Estampillas y tasas</th><th>Archivo</th><th></th></tr></thead><tbody>
+        ${ds.map((d) => `<tr><td><b>${d.anio}</b></td><td class="num">${fmt(new Set(d.filas.map((r) => r.nit)).size)}</td><td class="num">${fmt(suma(d, "renta"))}</td><td class="num">${fmt(suma(d, "iva"))}</td><td class="num">${fmt(suma(d, "ica"))}</td><td class="num">${fmt(suma(d, "otros"))}</td>
+          <td><small>${esc(d.archivo || "")}<br>${esc(fechaC(String(d.cargado || "").slice(0, 10)))}</small></td>
+          <td class="num">${CRT.confirmar === d.anio ? `<button class="btn chico peligro" data-crt="borrar" data-anio="${d.anio}">Eliminar</button> <button class="btn chico" data-crt="cancelar">No</button>` : `<button class="btn chico" data-crt="pedir-borrar" data-anio="${d.anio}">Quitar</button>`}</td></tr>`).join("")}</tbody></table></div>` : ""}</section>`;
   }
   function formNuevoRQ() {
     const f = RQ.nuevo;
@@ -10723,7 +10869,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       <p class="pie"><b>Descargar todo (ZIP)</b> trae un archivo por numeral con el nombre que pide la DIAN, la carta de respuesta y una lista de lo que falta adjuntar (firmas, escaneos y certificados). Vence a los ${q.plazo || 15} días calendario de la notificación${venceRQ(q) ? `: <b>${esc(fechaLarga(venceRQ(q)))}</b>` : ""}. No responder a tiempo acarrea la sanción del artículo 651 del Estatuto Tributario.</p>
       ${(q.avisos || []).length || q.leidoOCR ? `<div class="aviso ${(q.avisos || []).length ? "advertencia" : "info"}" style="margin-top:10px"><p>${q.leidoOCR ? "Datos leídos del PDF escaneado con OCR: revise número, fechas, correos y el texto de cada numeral. " : ""}${(q.avisos || []).map(esc).join(" ")}</p></div>` : ""}
       ${q.textoLeido ? `<details class="conf" style="margin-top:8px"><summary>Texto leído del requerimiento</summary><div><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(q.textoLeido)}</pre></div></details>` : ""}
-      <h3 style="margin:14px 0 6px">Información del año ${y} que usan los anexos</h3><ul class="hallazgos">${falta(tieneAn, `Balance por tercero ${y} (Años cerrados)`, "anual:cargar")}${falta(tieneLibro, `Libro auxiliar ${y} (para pasivos, compras y retenciones)`, "consulta:resumen")}${falta(Boolean(decl), `Declaración de renta ${y}${decl ? ` (formulario ${esc(decl.formulario)})` : ""}`, "renta")}</ul></section>
+      <h3 style="margin:14px 0 6px">Información del año ${y} que usan los anexos</h3><ul class="hallazgos">${falta(tieneAn, `Balance por tercero ${y} (Años cerrados)`, "anual:cargar")}${falta(tieneLibro, `Libro auxiliar ${y} (para pasivos, compras y retenciones)`, "consulta:resumen")}${falta(Boolean(decl), `Declaración de renta ${y}${decl ? ` (formulario ${esc(decl.formulario)})` : ""}`, "renta")}${CRT.docs.has(y) ? `<li><span class="chip ok">Cargado</span> Certificados de retención ${y} (${fmt(new Set(CRT.docs.get(y).filas.map((r) => r.nit)).size)} agentes)</li>` : `<li><span class="chip advertencia">Falta</span> Certificados de retención ${y} — cárguelos arriba, en «Certificados de retención recibidos»</li>`}</ul></section>
       <section class="panel"><h2>Lo que pide la DIAN</h2><p class="sub">Cada numeral con el documento que lo responde. Descárguelo con el botón de la derecha; el estado pasa a «En proceso» y usted lo marca «Listo» cuando esté revisado.</p>
       <div class="tabla-env"><table class="lista cq rq-tabla"><thead><tr><th>N.°</th><th>Solicitud de la DIAN</th><th>Estado y responsable</th><th class="num">Documento</th></tr></thead><tbody>
       ${q.items.map((it, i) => { const fmtN = formatoNumeralRQ(it, null); const arch = fmtN ? nombreArchRQ(q, it, it.tipo === "cambio" ? "pdf" : fmtN) : ""; return `<tr><td><b>${it.n}</b></td>
@@ -10739,6 +10885,13 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
 
   /* ---------- eventos */
   function clicReq(t) {
+    if (t.dataset.crt) {
+      const c = t.dataset.crt;
+      if (c === "pedir-borrar") { CRT.confirmar = Number(t.dataset.anio); render(); }
+      else if (c === "cancelar") { CRT.confirmar = null; render(); }
+      else if (c === "borrar") borrarCertificadosRet(Number(t.dataset.anio));
+      return true;
+    }
     const a = t.dataset.rq; if (!a) return false;
     const q = RQ.docs.get(t.dataset.id || RQ.sel);
     if (a === "nuevo") { nuevoRQ(); RQ.error = ""; render(); }
@@ -10759,6 +10912,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     return true;
   }
   function cambioReq(el) {
+    if (el.id === "archivo-crt") { if (el.files.length) leerCertificadosRet([...el.files]); el.value = ""; return true; }
     if (el.id === "archivo-rq-nuevo") { if (el.files.length) cargarPdfsRQ([...el.files]); el.value = ""; return true; }
     if (el.id === "archivo-rq") { const q = RQ.docs.get(RQ.sel); if (q && el.files[0]) subirPdfRQ(q, el.files[0]); el.value = ""; return true; }
     if (el.dataset.rqni !== undefined) { const it = RQ.nuevo.items[Number(el.dataset.rqni)]; it[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; return true; }
@@ -10818,11 +10972,12 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
 
   /* ------------------------------------------------------------ eventos */
   document.addEventListener("click", (ev) => {
-    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],[data-rq],#zona-rq,#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
+    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],[data-rq],[data-crt],#zona-crt,#zona-rq,#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
     if (!t) return;
     if ((t.id === "zona-rt" || t.dataset.rt) && clicRenta(t)) return;
     if (t.id === "zona-rq") return $("#archivo-rq-nuevo").click();
-    if (t.dataset.rq && clicReq(t)) return;
+    if (t.id === "zona-crt") return $("#archivo-crt").click();
+    if ((t.dataset.rq || t.dataset.crt) && clicReq(t)) return;
     if ((t.id === "zona-an" || t.dataset.an) && clicAnual(t)) return;
     if ((t.id === "zona-cq" || t.dataset.cq) && clicConsulta(t)) return;
     if ((t.id === "zona-dn" || t.dataset.dn || t.dataset.dndif !== undefined) && clicDian(t)) return;
@@ -10977,10 +11132,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     const sub = $("#vista .panel .sub"); if (sub) sub.textContent = "Hay cambios sin guardar.";
   }
   // Arrastrar y soltar
-  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
-  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq"); if (z) z.classList.remove("sobre"); });
-  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id === "zona-dn") return leerArchivosDian(fs); if (z.id === "zona-cq") return leerArchivosAux(fs); if (z.id === "zona-an") return leerArchivosAnual(fs); if (z.id === "zona-rt") return leerArchivosRenta(fs); if (z.id === "zona-rq") return cargarPdfsRQ(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
-  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-rq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rq-nuevo").click(); return; } if (ev.target.id === "zona-rt" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rt").click(); return; } if (ev.target.id === "zona-an" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-an").click(); return; } if (ev.target.id === "zona-cq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-cq").click(); return; } if (ev.target.id === "zona-dn" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-dn").click(); return; } if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
+  document.addEventListener("dragover", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq,#zona-crt"); if (z) { ev.preventDefault(); z.classList.add("sobre"); } });
+  document.addEventListener("dragleave", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq,#zona-crt"); if (z) z.classList.remove("sobre"); });
+  document.addEventListener("drop", (ev) => { const z = ev.target.closest?.("#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,#zona-rq,#zona-crt"); if (!z) return; ev.preventDefault(); z.classList.remove("sobre"); const fs = [...ev.dataTransfer.files]; if (!fs.length) return; if (z.id === "zona-bc") return leerArchivosBancos(fs); if (z.id === "zona-pv") return leerArchivosPV(fs); if (z.id === "zona-dn") return leerArchivosDian(fs); if (z.id === "zona-cq") return leerArchivosAux(fs); if (z.id === "zona-an") return leerArchivosAnual(fs); if (z.id === "zona-rt") return leerArchivosRenta(fs); if (z.id === "zona-rq") return cargarPdfsRQ(fs); if (z.id === "zona-crt") return leerCertificadosRet(fs); if (z.id !== "zona") leerPdfImpuestos(fs); else leerArchivo(fs[0]); });
+  document.addEventListener("keydown", (ev) => { if (ev.target.id === "zona-crt" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-crt").click(); return; } if (ev.target.id === "zona-rq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rq-nuevo").click(); return; } if (ev.target.id === "zona-rt" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-rt").click(); return; } if (ev.target.id === "zona-an" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-an").click(); return; } if (ev.target.id === "zona-cq" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-cq").click(); return; } if (ev.target.id === "zona-dn" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-dn").click(); return; } if (ev.target.id === "zona-pv" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-pv").click(); return; } if (ev.target.id === "zona-bc" && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $("#archivo-bc").click(); return; } if (["zona", "zona-imp", "zona-decl"].includes(ev.target.id) && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); $(ev.target.id === "zona" ? "#archivo" : "#archivo-imp").click(); } });
 
   /* ------------------------------------------------------------ base de datos */
   function estadoDB(texto, mal) { const e = $("#estado-db"); e.textContent = texto; e.classList.toggle("mal", Boolean(mal)); }
@@ -11060,6 +11215,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       S.rq.docs = new Map(snap.docs.map((d) => { const x = d.data(); x.anio = Number(x.anio); if (prev.get(d.id)?._pdf) x._pdf = prev.get(d.id)._pdf; return [d.id, x]; }));
       const ae = document.activeElement;
       if (!S.cargando && S.tab === "req" && !S.rq.ocupado && !(ae && (ae.dataset?.rqi !== undefined || ae.dataset?.rqc || ae.dataset?.rqn || ae.dataset?.rqni !== undefined))) render();
+    }, () => {});
+    db.collection("certRetencion").onSnapshot((snap) => {
+      S.crt.docs = new Map(snap.docs.map((d) => { const x = d.data(); x.anio = Number(x.anio); return [x.anio, x]; }));
+      if (!S.cargando && S.tab === "req" && !S.crt.ocupado && !S.rq.ocupado) render();
     }, () => {});
     db.collection("renta").onSnapshot((snap) => {
       const prev = S.rt.docs;

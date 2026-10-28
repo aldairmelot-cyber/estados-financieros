@@ -30,6 +30,8 @@ Con el balance por tercero del año (Años cerrados), el libro auxiliar (Consult
 - entidades financieras a las que hay que pedir el certificado tributario;
 - diferencia en cambio.
 
+**Certificados de retención recibidos.** En la misma pantalla se suelta el Excel con los certificados que enviaron los agentes retenedores (una fila por concepto: año, NIT, agente, tipo —Renta, IVA, ICA o Estampillas y tasas—, concepto, base y valor retenido). Se guardan por año en la colección `certRetencion`. El anexo del renglón 106 marca cada agente como ADJUNTO o POR SOLICITAR y agrega la hoja **Cruce certificados**: retención según libro auxiliar contra certificado, por NIT, con los agentes sin certificado, los que no coinciden (más de $1.000) y los certificados sin registro en libros. La lista de lo que falta del ZIP nombra a quién hay que pedirle el certificado.
+
 También genera el borrador de la carta de respuesta en Word, con marcas [COMPLETAR] en lo que debe revisar el contador.
 
 ## Declaraciones de renta
