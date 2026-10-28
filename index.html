@@ -10257,11 +10257,11 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       const L = X.libro, nitEmp = S.cfg.empresa.nit.replace(/\D/g, "").slice(0, 9);
       const ctas = new Set(Object.entries(L.cuentas).filter(([c, n]) => c.startsWith("1355") && /RETENCI[OÓ]N EN LA FUENTE/i.test(n)).map(([c]) => c));
       const esNota = (t) => /NOTA (DE )?CONTABILIDAD/i.test(L.tipos[t] || "");
-      const M = new Map(); let nota = 0, propio = 0;
+      const M = new Map();
       for (const r of L.rows) {
         if (!ctas.has(r[F_CTA]) || L.ci.has(r[F_TIPO])) continue;
-        if (esNota(r[F_TIPO])) { nota += r[F_D] - r[F_C]; continue; }
-        if (r[F_NIT] === nitEmp || r[F_NIT] === "800197268") { propio += r[F_D] - r[F_C]; continue; }
+        if (esNota(r[F_TIPO])) continue;
+        if (r[F_NIT] === nitEmp || r[F_NIT] === "800197268") continue;
         const conc = /CONCILIACION/i.test(L.tipos[r[F_TIPO]] || "") ? "Retención practicada por entidad financiera" : /RECIBO/i.test(L.tipos[r[F_TIPO]] || "") ? "Retención practicada en el pago (recibo de caja)" : /NOTA CREDITO/i.test(L.tipos[r[F_TIPO]] || "") ? "Reversión por nota crédito" : /FACTURA/i.test(L.tipos[r[F_TIPO]] || "") ? "Retención en la fuente por ventas" : (L.tipos[r[F_TIPO]] || r[F_TIPO]);
         const k = r[F_NIT] + "|" + conc;
         const m = M.get(k) || { nit: r[F_NIT], conc, base: 0, v: 0 };
@@ -10274,11 +10274,9 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       let total = 0;
       for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), !cruce ? "POR ADJUNTAR" : cruce.sinCert.some((f) => f.n === m.nit) ? "POR ADJUNTAR" : "ADJUNTO"]); total += m.v; }
       const resumen = cierreRQ(aoa, total, [], X, 106, 5);
-      aoa.push([], ["Movimientos de la cuenta no incluidos en la relación:"], ["", "", "", "Notas de contabilidad (liquidación de autorretención y aplicación a la declaración)", "", r2a(nota)]);
-      if (propio) aoa.push(["", "", "", "Movimientos con el NIT de la propia empresa o con la DIAN", "", r2a(propio)]);
-      const hojas = [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.${cruce ? ` ${cruce.hoja.resumen.texto}` : " Sin certificados cargados para el cruce."}` } }];
-      if (cruce) hojas.push(cruce.hoja);
-      return hojas;
+      // El cruce con los certificados es de uso interno: no va en el anexo; solo alimenta la lista de pendientes del ZIP.
+      const interno = cruce ? { certFaltan: cruce.sinCert, certDif: cruce.conDif, certSinLibro: cruce.sinLibro } : {};
+      return [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, ...interno, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.` } }];
     },
     certificados(X) {
       const M = new Map();
@@ -10293,13 +10291,12 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       for (const [n, m] of [...M]) if (!(FIN.test(X.nom(n)) && !/UNIVERSIDAD|SEGUROS/i.test(X.nom(n)) && (m.intereses + m.comisiones + m.gmf >= 1000 || m.obligaciones >= 1000))) M.delete(n);
       const aoa = [["NIT", "DV", "Entidad", "Obligaciones a 31-dic", "Intereses", "Comisiones y gastos bancarios", "GMF", "Total deducido"]];
       for (const [n, m] of [...M].sort((a, b) => b[1].intereses + b[1].comisiones + b[1].gmf - (a[1].intereses + a[1].comisiones + a[1].gmf))) aoa.push([n, dvNit(n), X.nom(n), r2a(m.obligaciones), r2a(m.intereses), r2a(m.comisiones), r2a(m.gmf), r2a(m.intereses + m.comisiones + m.gmf)]);
-      aoa.push([], ["Además de los bancos, revise si hubo pagos a otras entidades financieras (leasing, fiducias, datáfonos) que deban certificar intereses o comisiones."]);
       const hojas = [{ nombre: "Certificados financieros", titulo: `Entidades financieras con obligaciones o gastos financieros en ${X.y}`, aoa, anchos: [13, 4, 40, 18, 16, 18, 16, 16], resumen: { texto: `${fmt(M.size)} entidades financieras` } }];
       const R = retenedoresRQ(X);
       if (R) {
         hojas[0].resumen.texto += ` y ${fmt(R.filas.length)} agentes que practicaron retención (renta ${fmt(R.tot.renta)}).`;
         hojas.push({ nombre: "Agentes retenedores", titulo: `Terceros que practicaron retención a la sociedad en ${X.y} (retención en la fuente, IVA e ICA)`, aoa: R.aoa, anchos: [13, 4, 44, 18, 16, 16, 18], resumen: { total: R.tot.renta, declarado: X.R(106), renglon: 106, texto: `${fmt(R.filas.length)} agentes retenedores.` } });
-      } else hojas[0].aoa.push([], ["Para listar los terceros que practicaron retención (nombre, NIT y valor), cargue el libro auxiliar del año en Consulta de movimientos."]);
+      }
       return hojas;
     },
     cambio(X) {
@@ -10318,11 +10315,10 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     const clase = (c) => { if (!c.startsWith("1355")) return null; const n = L.cuentas[c] || ""; return /IVA/i.test(n) ? "iva" : /INDUSTRIA Y COMERCIO|\bICA\b/i.test(n) ? "ica" : /RETENCI[OÓ]N EN LA FUENTE/i.test(n) ? "renta" : null; };
     const esNota = (t) => /NOTA (DE )?CONTABILIDAD/i.test(L.tipos[t] || "");
     const M = new Map(), esDian = (n) => n === "800197268" || /DIRECCION DE IMPUESTOS/i.test(L.nits[n] || "");
-    let dian = 0;
     for (const r of L.rows) {
       const k = clase(r[F_CTA]);
       if (!k || L.ci.has(r[F_TIPO]) || esNota(r[F_TIPO]) || r[F_NIT] === nitEmp || !r[F_NIT]) continue;
-      if (esDian(r[F_NIT])) { dian += r[F_D] - r[F_C]; continue; }
+      if (esDian(r[F_NIT])) continue;
       const m = M.get(r[F_NIT]) || { renta: 0, base: 0, iva: 0, ica: 0 };
       m[k] += r[F_D] - r[F_C];
       if (k === "renta") m.base += r[F_BASE];
@@ -10335,8 +10331,6 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       [], ["", "", "Total", r2a(tot.renta), r2a(tot.base), r2a(tot.iva), r2a(tot.ica)]];
     const dec = X.R(106);
     if (dec != null) aoa.push(["", "", "Otras retenciones declaradas (renglón 106)", dec], ["", "", Math.abs(dec - tot.renta) < 1000 ? "Diferencia (redondeo)" : "Diferencia por explicar", r2a(dec - tot.renta)]);
-    if (Math.abs(dian) >= 0.5) aoa.push(["", "", "Movimientos con la DIAN en estas cuentas (no son retenciones de terceros)", r2a(dian)]);
-    aoa.push([], ["No incluye las notas de contabilidad (liquidación de la autorretención y aplicación a la declaración) ni los movimientos con el NIT de la propia empresa."]);
     return { filas, tot, aoa };
   }
 
