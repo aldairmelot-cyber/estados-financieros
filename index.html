@@ -9998,7 +9998,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     const nits = new Set([...libroNit.keys(), ...[...C].filter(([, m]) => Math.abs(m.renta) >= 0.5).map(([n]) => n)]);
     const filas = [...nits].map((n) => {
       const lib = libroNit.get(n) || 0, c = C.get(n), cer = c ? c.renta : 0, tiene = Boolean(c && Math.abs(c.renta) >= 0.5), dif = cer - lib;
-      const estado = !tiene ? "SIN CERTIFICADO – SOLICITAR" : Math.abs(lib) < 0.5 ? "Certificado sin registro en libros" : Math.abs(dif) < 1000 ? "Cuadra" : "Diferencia por revisar";
+      const estado = !tiene ? "Sin certificado" : Math.abs(lib) < 0.5 ? "Certificado sin registro en libros" : Math.abs(dif) < 1000 ? "Cuadra" : "Diferencia por revisar";
       return { n, nombre: X.nom(n) || X.libro?.nits?.[n] || c?.agente || "", lib, cer, dif, estado, obs: c ? c.obs.join(" · ") : "", tiene };
     }).sort((a, b) => (a.estado === "Cuadra") - (b.estado === "Cuadra") || Math.abs(b.dif) - Math.abs(a.dif));
     const aoa = [["NIT del agente retenedor", "DV", "Nombre o razón social", "Retención según libro auxiliar", "Retención según certificado", "Diferencia (certificado − libro)", "Estado", "Observación del certificado"]];
@@ -10016,7 +10016,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       for (const [n, m] of otros) aoa.push([n, dvNit(n), X.nom(n) || m.agente, r2a(m.iva), r2a(m.ica), r2a(m.otros)]);
     }
     return { sinCert, conDif, sinLibro, tot, hoja: { nombre: "Cruce certificados", titulo: `Retención en la fuente ${X.y}: libro auxiliar contra certificados recibidos, por agente retenedor`, aoa, anchos: [13, 4, 44, 18, 18, 18, 30, 60],
-      resumen: { texto: `${cuenta(filas.filter((f) => f.tiene))} agentes con certificado, ${cuenta(sinCert)} por solicitar, ${cuenta(conDif)} con diferencia y ${cuenta(sinLibro)} certificados sin registro en libros.`, certFaltan: sinCert, certDif: conDif, certSinLibro: sinLibro } } };
+      resumen: { texto: `${cuenta(filas.filter((f) => f.tiene))} agentes con certificado, ${cuenta(sinCert)} sin certificado, ${cuenta(conDif)} con diferencia y ${cuenta(sinLibro)} certificados sin registro en libros.`, certFaltan: sinCert, certDif: conDif, certSinLibro: sinLibro } } };
   }
   const MODELO_RQ = [
     ["eeff", "Estados financieros firmados por representante legal y revisor fiscal y/o contador."],
@@ -10272,7 +10272,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       const libroNit = new Map(); for (const m of xs) libroNit.set(m.nit, (libroNit.get(m.nit) || 0) + m.v);
       const cruce = cruceCertRQ(X, libroNit);
       let total = 0;
-      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), !cruce ? "POR ADJUNTAR" : cruce.sinCert.some((f) => f.n === m.nit) ? "POR SOLICITAR" : "ADJUNTO"]); total += m.v; }
+      for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), !cruce ? "POR ADJUNTAR" : cruce.sinCert.some((f) => f.n === m.nit) ? "POR ADJUNTAR" : "ADJUNTO"]); total += m.v; }
       const resumen = cierreRQ(aoa, total, [], X, 106, 5);
       aoa.push([], ["Movimientos de la cuenta no incluidos en la relación:"], ["", "", "", "Notas de contabilidad (liquidación de autorretención y aplicación a la declaración)", "", r2a(nota)]);
       if (propio) aoa.push(["", "", "", "Movimientos con el NIT de la propia empresa o con la DIAN", "", r2a(propio)]);
@@ -10507,7 +10507,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           if (!cr) faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista (cárguelos en Requerimientos DIAN → Certificados de retención para cruzarlos).`);
           else {
             faltan.push(`${it.n}. Adjuntar los certificados de retención recibidos (escaneados) de los agentes de la hoja «Cruce certificados».`);
-            if (cr.certFaltan.length) faltan.push(`${it.n}. Solicitar el certificado a ${fmt(cr.certFaltan.length)} agentes: ${cr.certFaltan.map((f) => `${f.nombre || f.n} (${nitDV(f.n)}) $ ${fmt(f.lib)}`).join("; ")}.`);
+            if (cr.certFaltan.length) faltan.push(`${it.n}. Agentes sin certificado (${fmt(cr.certFaltan.length)}): ${cr.certFaltan.map((f) => `${f.nombre || f.n} (${nitDV(f.n)}) $ ${fmt(f.lib)}`).join("; ")}.`);
             if (cr.certDif.length) faltan.push(`${it.n}. Revisar ${fmt(cr.certDif.length)} agentes cuyo certificado no coincide con el libro: ${cr.certDif.map((f) => `${f.nombre || f.n} (dif. $ ${fmt(f.dif)})`).join("; ")}.`);
           }
         }
