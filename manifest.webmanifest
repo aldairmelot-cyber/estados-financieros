@@ -1,0 +1,17 @@
+{
+  "name": "Estados Financieros · Districlínicas",
+  "short_name": "Districlínicas",
+  "description": "Estados financieros, impuestos, conciliaciones, verificación DIAN y requerimientos de Distribuciones Clínicas de la Costa S.A.S.",
+  "lang": "es-CO",
+  "start_url": "./?app=1",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#20386e",
+  "theme_color": "#20386e",
+  "icons": [
+    { "src": "iconos/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "iconos/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "iconos/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

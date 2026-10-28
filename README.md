@@ -50,6 +50,16 @@ El Excel se lee en el navegador por partes (aguanta libros de cientos de miles d
 
 Es un sitio estático: un solo `index.html` que se ejecuta completo en el navegador. Los archivos contables se procesan en el equipo de quien los carga; no se suben al repositorio.
 
+## Instalar en el computador o el celular
+
+La app se usa en el navegador en `https://aldairmelot-cyber.github.io/estados-financieros/` y también se puede instalar como aplicación, con su propio ícono y ventana:
+
+- **Windows o Mac (Chrome o Edge):** abra la dirección, pulse el ícono de instalar en la barra de direcciones (o menú **⋮ → Transmitir, guardar y compartir → Instalar página como app** en Chrome; **… → Aplicaciones → Instalar este sitio como una aplicación** en Edge). Queda en el menú Inicio y puede anclarla a la barra de tareas o crear el acceso en el escritorio.
+- **Android (Chrome):** menú **⋮ → Instalar aplicación**.
+- **iPhone (Safari):** **Compartir → Agregar a inicio**.
+
+La app instalada siempre carga la última versión publicada y usa los mismos datos de Firebase que la versión web (`manifest.webmanifest`, `sw.js` e `iconos/`).
+
 ## Publicar en GitHub Pages
 
 1. Cree un repositorio en GitHub (por ejemplo `estados-financieros`) y suba estos archivos a la rama `main`.
