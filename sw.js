@@ -1,7 +1,7 @@
 /* Service worker mínimo: permite instalar la app en el computador o el celular.
    Siempre busca primero la versión en línea (la app y los datos quedan al día);
    solo usa la copia guardada si no hay conexión. No toca Firebase ni Google. */
-const CACHE = "estados-financieros-v1";
+const CACHE = "estados-financieros-v2";
 const BASE = ["./", "./index.html", "./config.js", "./plataforma.js", "./manifest.webmanifest", "./iconos/icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(BASE)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
