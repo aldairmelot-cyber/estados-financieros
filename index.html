@@ -10475,17 +10475,24 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     // Numerales: del primer "1." al aviso de sanción, sin los encabezados de página.
     let cuerpo = T.split(/\n\s*De no d[aá]rsele|\n\s*De no darsele/i)[0];
     cuerpo = cuerpo.replace(/\n[^\n]*P[aá]gina\s+No\.?[^\n]*\n/gi, "\n").replace(/\n[^\n]*Continuaci[oó]n del Requerimiento[^\n]*\n(?:[^\n]*fecha[^\n]*\n)?/gi, "\n").replace(/\n[^\n]*C[oó]digo Acto[^\n]*\n/gi, "\n");
-    const ini = cuerpo.search(/\n\s*1\s*[.,)]\s+\S/);
-    const items = [];
-    if (ini >= 0) {
-      const partes = cuerpo.slice(ini).split(/\n\s*(\d{1,2})\s*[.,)]\s+/);
-      // partes: ["", "1", texto, "2", texto…]; solo se aceptan números consecutivos.
+    // partes: ["", "1", texto, "2", texto…]; solo se aceptan números consecutivos.
+    const partir = (reIni, reSep) => {
+      const ini = cuerpo.search(reIni), out = [];
+      if (ini < 0) return out;
+      const partes = cuerpo.slice(ini).split(reSep);
       let esperado = 1, actual = null;
       for (let i = 1; i < partes.length; i += 2) {
         const n = Number(partes[i]), t = partes[i + 1] || "";
-        if (n === esperado) { actual = { n, texto: t }; items.push(actual); esperado++; }
+        if (n === esperado) { actual = { n, texto: t }; out.push(actual); esperado++; }
         else if (actual) actual.texto += ` ${partes[i]}. ${t}`;
       }
+      return out;
+    };
+    let items = partir(/\n\s*1\s*[.,)\-–]\s+\S/, /\n\s*(\d{1,2})\s*[.,)\-–]\s+/);
+    if (items.length < 2) {
+      // El OCR o el PDF a veces pegan los numerales en un solo renglón: se buscan "2.", "3." después de un punto, dos puntos o punto y coma.
+      const enLinea = partir(/(?:^|\n|[.:;]\s+)\s*1\s*[.,)\-–]\s+[A-ZÁÉÍÓÚa-z]/, /(?:\n|(?<=[.:;])\s+)\s*(\d{1,2})\s*[.,)\-–]\s+(?=[A-ZÁÉÍÓÚa-z])/);
+      if (enLinea.length > items.length) items = enLinea;
     }
     for (const it of items) {
       it.texto = it.texto.replace(/\s*\n\s*/g, " ").replace(/\s+/g, " ").replace(/[ ,.]+$/, ".").trim();
@@ -10761,9 +10768,14 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       ${q.textoLeido ? `<details class="conf" style="margin-top:8px"><summary>Texto leído del requerimiento</summary><div><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(q.textoLeido)}</pre></div></details>` : ""}
       <h3 style="margin:14px 0 6px">Información del año ${y} que usan los anexos</h3><ul class="hallazgos">${falta(tieneAn, `Balance por tercero ${y} (Años cerrados)`, "anual:cargar")}${falta(tieneLibro, `Libro auxiliar ${y} (para pasivos, compras y retenciones)`, "consulta:resumen")}${falta(Boolean(decl), `Declaración de renta ${y}${decl ? ` (formulario ${esc(decl.formulario)})` : ""}`, "renta")}</ul></section>
       <section class="panel"><h2>Lo que pide la DIAN</h2><p class="sub">Cada numeral con el documento que lo responde. Descárguelo con el botón de la derecha; el estado pasa a «En proceso» y usted lo marca «Listo» cuando esté revisado.</p>
+      <div class="fila" style="margin:4px 0 10px;gap:8px;flex-wrap:wrap"><span class="pie" style="margin:0">¿Faltan numerales?</span>
+        ${q.textoLeido ? `<button class="btn chico" data-rq="releer" data-id="${esc(q.numero)}">Volver a leer los numerales del PDF</button>` : ""}
+        ${[...RQ.docs.values()].filter((o) => o.numero !== q.numero && (o.items || []).length > 1).map((o) => `<button class="btn chico" data-rq="copiar" data-id="${esc(q.numero)}" data-de="${esc(o.numero)}">Copiar los ${o.items.length} numerales del requerimiento ${esc(o.numero)} (año ${o.anio})</button>`).join("")}
+        <button class="btn chico" data-rq="modelo" data-id="${esc(q.numero)}">Usar los ${MODELO_RQ.length} numerales del modelo de la DIAN</button>
+        <button class="btn chico" data-rq="agregar" data-id="${esc(q.numero)}">Agregar un numeral</button></div>
       <div class="tabla-env"><table class="lista cq rq-tabla"><thead><tr><th>N.°</th><th>Solicitud de la DIAN</th><th>Estado y responsable</th><th class="num">Documento</th></tr></thead><tbody>
       ${q.items.map((it, i) => { const fmtN = formatoNumeralRQ(it, null); const arch = fmtN ? nombreArchRQ(q, it, it.tipo === "cambio" ? "pdf" : fmtN) : ""; return `<tr><td><b>${it.n}</b></td>
-        <td class="cq-conc" style="max-width:520px">${esc(textoItem(it, q))}<small><select data-rqi="${i}" data-k="tipo" aria-label="Anexo que responde este numeral" title="Anexo que responde este numeral" style="padding:1px 4px;margin:2px 0">${Object.entries(TIPO_RQ).map(([k, t]) => `<option value="${k}" ${it.tipo === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>${it.tipo === "costos" ? ` · renglones <input type="text" data-rqi="${i}" data-k="renglones" value="${esc(it.renglones || "")}" style="width:120px;padding:1px 4px" aria-label="Renglones">` : ""}</small>
+        <td class="cq-conc" style="max-width:520px">${it.agregado ? `<textarea data-rqi="${i}" data-k="texto" rows="2" placeholder="Escriba lo que pide la DIAN en este numeral" style="width:100%" aria-label="Texto del numeral">${esc(it.texto || "")}</textarea>` : esc(textoItem(it, q))}<small><select data-rqi="${i}" data-k="tipo" aria-label="Anexo que responde este numeral" title="Anexo que responde este numeral" style="padding:1px 4px;margin:2px 0">${Object.entries(TIPO_RQ).map(([k, t]) => `<option value="${k}" ${it.tipo === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>${it.tipo === "costos" ? ` · renglones <input type="text" data-rqi="${i}" data-k="renglones" value="${esc(it.renglones || "")}" style="width:120px;padding:1px 4px" aria-label="Renglones">` : ""}</small>
           <textarea data-rqi="${i}" data-k="notas" rows="1" placeholder="Notas" style="width:100%;margin-top:4px" aria-label="Notas">${esc(it.notas || "")}</textarea></td>
         <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select>
           <input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" placeholder="Responsable" style="width:130px;margin-top:4px;display:block" aria-label="Responsable"></td>
@@ -10789,10 +10801,34 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     else if (a === "pdf" && q) bajarPdfRQ(q);
     else if (a === "subir-pdf") $("#archivo-rq").click();
     else if (a === "eeff") { S.an.anio = Number(t.dataset.anio); S.an.vista = "esf"; S.tab = "anual"; render(); window.scrollTo(0, 0); }
+    else if (["releer", "copiar", "modelo", "agregar"].includes(a) && q) reemplazarNumeralesRQ(q, a, t.dataset.de);
     else if (a === "pedir-borrar") { RQ.confirmar = t.dataset.id; render(); }
     else if (a === "cancelar") { RQ.confirmar = null; render(); }
     else if (a === "borrar") borrarRQ(t.dataset.id);
     return true;
+  }
+  /** Rehace la lista de numerales de un requerimiento conservando estado, responsable y notas de los que coinciden por tipo. */
+  async function reemplazarNumeralesRQ(q, modo, de) {
+    let nuevos;
+    if (modo === "agregar") nuevos = [...q.items.map((it) => ({ ...it })), { n: q.items.length + 1, tipo: "otro", tipoManual: true, agregado: true, texto: "", renglones: "", estado: "pendiente", resp: "", notas: "" }];
+    else {
+      let base = [];
+      if (modo === "releer") base = parsearRQ(q.textoLeido || "", "").items.map((it) => ({ tipo: it.tipo, texto: it.texto, renglones: it.renglones || "" }));
+      if (modo === "copiar") { const o = RQ.docs.get(de); base = (o?.items || []).map((it) => ({ tipo: it.tipo, tipoManual: it.tipoManual, texto: textoItem(it, o).replace(new RegExp(`\\b${o.anio}\\b`, "g"), String(q.anio)), renglones: it.renglones || "" })); }
+      if (modo === "modelo") base = MODELO_RQ.map(([tipo, texto, renglones]) => ({ tipo, texto, renglones: renglones || "" }));
+      if (modo === "releer" && base.length <= q.items.length) { toast(`Al volver a leer el PDF salen ${base.length} numeral(es), los mismos de ahora. Use «Copiar» o «Usar el modelo», o agréguelos a mano.`); return; }
+      if (!base.length) { toast("No se encontraron numerales."); return; }
+      const usados = new Set();
+      nuevos = base.map((it, i) => {
+        const j = q.items.findIndex((x, k) => !usados.has(k) && x.tipo === it.tipo && it.tipo !== "otro");
+        const ant = j >= 0 ? (usados.add(j), q.items[j]) : null;
+        return { n: i + 1, ...it, tipoManual: Boolean(it.tipoManual), estado: ant?.estado || "pendiente", resp: ant?.resp || "", notas: ant?.notas || "" };
+      });
+    }
+    q.items = nuevos;
+    await guardarRQ(q);
+    toast(`El requerimiento ${q.numero} quedó con ${nuevos.length} numerales.`);
+    render();
   }
   function cambioReq(el) {
     if (el.id === "archivo-rq-nuevo") { if (el.files.length) cargarPdfsRQ([...el.files]); el.value = ""; return true; }
