@@ -927,7 +927,7 @@ const Motor = (() => {
     return {
       b, periodo, anio, mes, alertas, cfg, comp,
       actual: { get: g(b, "ns"), cierre: false, fecha: finDeMes(periodo) },
-      acum: g(b, "ns"), mesGet, acumAnt,
+      acum: g(b, "ns"), mesGet, acumAnt, balAnt: prevAnio || null,
       dias: Math.round((Date.UTC(anio, mes - 1, ultimoDia(periodo)) - Date.UTC(anio, 0, 1)) / 86400000) + 1,
       sedes: vistasSede(hist, periodo),
     };
@@ -1415,6 +1415,7 @@ const Motor = (() => {
       const signo = estado === "ESF" ? (rs[0].seccion === "activo" ? 1 : -1) : (SIGNO_ERI[rs[0].seccion] || 1);
       const balances = [b];
       if (estado === "ESF" && ctx.comp?.bal && ctx.comp.bal !== b) balances.push(ctx.comp.bal);
+      if (estado === "ERI" && ctx.balAnt && ctx.balAnt !== b) balances.push(ctx.balAnt);
       const codigos = new Map();
       for (const bal of balances) {
         for (const p of prefijos) {
@@ -1433,7 +1434,8 @@ const Motor = (() => {
           filas.push({ cuenta: cod, nombre, vals: [a, c] });
         } else {
           const a = signo * valorEn(ctx.acum, b, cod);
-          const m = ctx.mesGet ? signo * valorEn(ctx.mesGet, b, cod) : null;
+          // Comparativo: acumulado del año anterior al mismo corte (null si ese año no está cargado).
+          const m = ctx.acumAnt ? signo * valorEn(ctx.acumAnt, ctx.balAnt || b, cod) : null;
           if (Math.abs(a) < 0.5 && (m == null || Math.abs(m) < 0.5)) continue;
           filas.push({ cuenta: cod, nombre, vals: [a, m] });
         }
@@ -1443,9 +1445,18 @@ const Motor = (() => {
         const res = (get) => -["4", "5", "6", "7"].reduce((s, x) => s + get(x), 0);
         filas.push({ cuenta: "", nombre: "Resultado del ejercicio en curso (ERI)", vals: [res(ctx.actual.get), ctx.comp ? res(ctx.comp.get) : null] });
       }
+      // Subcuentas que se presentan en una sola línea (p. ej. inventario, ventas y costo sin discriminar exento / gravado / excluido).
+      for (const g of cfg.notasAgrupar?.[nota] || []) {
+        const dentroG = filas.filter((f) => f.cuenta && f.cuenta.replace("*", "").startsWith(g.prefijo));
+        if (!dentroG.length) continue;
+        const suma = [0, 1].map((i) => (dentroG.every((f) => f.vals[i] == null) ? null : dentroG.reduce((s, f) => s + (f.vals[i] || 0), 0)));
+        const pos = filas.indexOf(dentroG[0]);
+        filas = filas.filter((f) => !dentroG.includes(f));
+        filas.splice(pos, 0, { cuenta: g.prefijo, nombre: g.nombre, vals: suma, fija: true });
+      }
       const total = [0, 1].map((i) => (filas.some((f) => f.vals[i] != null) ? filas.reduce((s, f) => s + (f.vals[i] || 0), 0) : null));
       // Agrupar partidas menores al umbral.
-      const menor = (f) => f.cuenta && f.vals.every((v, i) => v == null || !total[i] || Math.abs(v) < umbral * Math.abs(total[i]));
+      const menor = (f) => f.cuenta && !f.fija && f.vals.every((v, i) => v == null || !total[i] || Math.abs(v) < umbral * Math.abs(total[i]));
       const chicas = filas.filter(menor);
       if (chicas.length > 1) {
         filas = filas.filter((f) => !menor(f));
@@ -4044,6 +4055,12 @@ const VerifDian = (() => {
     umbralNotas: 0.01,
     tolRedondeo: 10,
     notasTexto: {},
+    // Subcuentas que se presentan en una sola línea en las notas (sin discriminar exento / gravado / excluido).
+    notasAgrupar: {
+      "1.3": [{ prefijo: "1435", nombre: "Inventario de productos farmacéuticos" }],
+      "4.1": [{ prefijo: "4135", nombre: "Ingresos por venta de productos farmacéuticos" }, { prefijo: "4175", nombre: "Devoluciones en ventas" }],
+      "6.1": [{ prefijo: "6135", nombre: "Costo de venta de productos farmacéuticos" }],
+    },
     notasTitulo: { "2.2": "Proveedores y cuentas por pagar", "2.5": "Otros pasivos", "3.0": "Patrimonio", "6.1": "Costo de ventas" },
     notasDesc: {
       "1.1": "Recursos disponibles en caja y en entidades financieras de libre disposición, conciliados al cierre, sin restricciones para su uso.",
@@ -4997,11 +5014,18 @@ const VerifDian = (() => {
         : `Al ${fechaLarga(fA)}, el saldo asciende a $${fmt(total[0])}, frente a $${fmt(total[1])} al ${fechaLarga(fB)}, lo que representa ${Math.abs(dif) < 0.5 ? "que no presenta variación" : `${dif > 0 ? "un aumento" : "una disminución"} de $${fmt(Math.abs(dif))}${p != null ? ` (${dec(Math.abs(p) * 100, 2)}%)` : ""}`}.`;
     } else {
       const ingOp = D.R.T.ingresos;
-      cols = [{ t: "Concepto", tipo: "txt" }, { t: `Acumulado al ${fechaLarga(fA)}`, tipo: "num" }, { t: `Mes de ${MESES[m - 1]}`, tipo: "num" }, { t: "% del total", tipo: "pct" }, { t: "% de ingresos op.", tipo: "pct" }];
-      const fila = (nombre, v, tipo) => ({ tipo, celdas: [nombre, v[0], v[1], total[0] ? v[0] / total[0] : null, ingOp[0] ? v[0] / ingOp[0] : null] });
+      const fBfin = finDeMes(`${ctx.anio - 1}-${String(m).padStart(2, "0")}`);
+      const conAnt = total[1] != null;
+      const pIng = (v) => (ingOp[0] ? v / ingOp[0] : null);
+      // Sin el año anterior cargado no se muestran columnas comparativas (antes salían como "n.a.").
+      cols = conAnt
+        ? [{ t: "Concepto", tipo: "txt" }, { t: `Acumulado al ${fechaLarga(fA)}`, tipo: "num" }, { t: `Acumulado al ${fechaLarga(fBfin)}`, tipo: "num" }, { t: "Variación", tipo: "num" }, { t: "Variación %", tipo: "pct" }, { t: "% de ingresos op.", tipo: "pct" }]
+        : [{ t: "Concepto", tipo: "txt" }, { t: `Acumulado al ${fechaLarga(fA)}`, tipo: "num" }, { t: "% del total", tipo: "pct" }, { t: "% de ingresos op.", tipo: "pct" }];
+      const fila = (nombre, v, tipo) => ({ tipo, sinNa: true, celdas: conAnt ? [nombre, v[0], v[1] ?? 0, ...var_(v[0], v[1] ?? 0), pIng(v[0])] : [nombre, v[0], total[0] ? v[0] / total[0] : null, pIng(v[0])] });
       filas = [...n.filas.map((f) => fila(f.nombre + (f.agrupadas ? ` (${f.agrupadas})` : ""), f.vals, "rubro")), fila(`TOTAL ${titulo}`, total, "gran")];
+      const [dif, p] = var_(total[0], total[1]);
       parrafo = `Del 1 de enero al ${fechaLarga(fA)}, el saldo acumulado asciende a $${fmt(total[0])}, equivalente al ${dec(ingOp[0] ? (total[0] / ingOp[0]) * 100 : 0, 2)}% de los ingresos operacionales.` +
-        (total[1] != null ? ` En el mes de ${MESES[m - 1]} el valor registrado fue de $${fmt(total[1])}.` : "");
+        (conAnt ? ` En el mismo período de ${ctx.anio - 1} fue de $${fmt(total[1])}, lo que representa ${Math.abs(dif) < 0.5 ? "que no presenta variación" : `${dif > 0 ? "un aumento" : "una disminución"} de $${fmt(Math.abs(dif))}${p != null ? ` (${dec(Math.abs(p) * 100, 2)}%)` : ""}`}.` : "");
     }
     return { nota: n.nota, titulo, desc: S.cfg.notasDesc[n.nota] || "", cols, filas, parrafo, extra: S.cfg.notasTexto[n.nota] || "" };
   }
