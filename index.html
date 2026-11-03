@@ -4352,21 +4352,22 @@ const VerifDian = (() => {
     const fA = finDeMes(ctx.periodo), [a, m] = anioMes(ctx.periodo);
     const fAnt = finDeMes(`${a - 1}-${String(m).padStart(2, "0")}`);
     const conAnt = R.T.neto[2] != null;
+    // Sin el año anterior cargado, el estado sale solo con el año (sin columnas "n.a.").
     const cols = [{ t: "Concepto", tipo: "txt" }, { t: "Nota", tipo: "nota" },
       { t: `Año ${a}`, tipo: "num" }, { t: "% sobre ingresos", tipo: "pct" },
-      { t: `Año ${a - 1}`, tipo: "num" }, { t: "% sobre ingresos", tipo: "pct" },
-      { t: "Variación absoluta", tipo: "num" }, { t: "Variación %", tipo: "pct" }];
+      ...(conAnt ? [{ t: `Año ${a - 1}`, tipo: "num" }, { t: "% sobre ingresos", tipo: "pct" },
+        { t: "Variación absoluta", tipo: "num" }, { t: "Variación %", tipo: "pct" }] : [])];
     const ing = R.T.ingresos;
     const filas = R.lineas.map((l) => {
       if (l.tipo === "seccion") return { tipo: "seccion", celdas: [l.rubro] };
       const v = l.vals;
-      return { tipo: l.tipo, celdas: [l.rubro, l.nota || "", v[0], ing[0] ? v[0] / ing[0] : null, v[2], v[2] != null && ing[2] ? v[2] / ing[2] : null,
-        ...var_(v[0], v[2])] };
+      return { tipo: l.tipo, celdas: [l.rubro, l.nota || "", v[0], ing[0] ? v[0] / ing[0] : null,
+        ...(conAnt ? [v[2], v[2] != null && ing[2] ? v[2] / ing[2] : null, ...var_(v[0], v[2])] : [])] };
     });
     const pie = [];
-    if (!conAnt) pie.push(`Para el comparativo con ${a - 1} cargue el balance de ${MESES[m - 1]} de ${a - 1} (mensual) o el acumulado de enero a ${MESES[m - 1]} de ${a - 1}. Mientras tanto la columna aparece como n.a.`);
+    if (!conAnt) pie.push(`Para el comparativo con ${a - 1} cargue el balance de ${MESES[m - 1]} de ${a - 1} (mensual) o el acumulado de enero a ${MESES[m - 1]} de ${a - 1}.`);
     if (Math.abs(R.control) > 1) pie.push(`Control: el resultado del ERI difiere del resultado del balance en ${fmt(R.control)}. Revise el mapeo.`);
-    return { clave: "eri", hoja: "ERI", titulo: "Estado de Resultado Integral", periodoTexto: `Del 1 de enero al ${fechaLarga(fA)} y del 1 de enero al ${fechaLarga(fAnt)}`, cols, filas, pie, firmas: true };
+    return { clave: "eri", hoja: "ERI", titulo: "Estado de Resultado Integral", periodoTexto: conAnt ? `Del 1 de enero al ${fechaLarga(fA)} y del 1 de enero al ${fechaLarga(fAnt)}` : `Del 1 de enero al ${fechaLarga(fA)}`, cols, filas, pie, firmas: true };
   }
 
   function modeloSede(D, vista) {
@@ -6629,6 +6630,9 @@ const VerifDian = (() => {
    * de la tabla, se rehace el estado pasando las últimas filas a la hoja siguiente
    * para que acompañen a las firmas. Cada hoja lleva el encabezado completo.
    */
+  /** Pie que va en los archivos: los estados financieros no llevan notas internas de control ni instrucciones de la app. */
+  const ESTADOS_OFICIALES = new Set(["esf", "eri", "ecp", "efe", "ind"]);
+  const pieArchivo = (m) => (ESTADOS_OFICIALES.has(m.clave) ? (m.pie || []).filter((p) => !/^(Control|Atención)\b|cargue|revise|mientras tanto|no hay datos|no se pueden calcular/i.test(p)) : m.pie || []);
   function pdfModelo(doc, m) {
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
     const apaisado = W > H;
@@ -6679,7 +6683,7 @@ const VerifDian = (() => {
       });
       return doc.lastAutoTable.finalY;
     };
-    const pieLineas = () => { doc.setFont("helvetica", "normal"); doc.setFontSize(7); return m.pie.flatMap((p) => doc.splitTextToSize(limpiarPDF(p), W - 28)); };
+    const pieLineas = () => { doc.setFont("helvetica", "normal"); doc.setFontSize(7); return pieArchivo(m).flatMap((p) => doc.splitTextToSize(limpiarPDF(p), W - 28)); };
     const escribirPie = (y) => { const ls = pieLineas(); doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(20); for (const ln of ls) { doc.text(ln, 14, y); y += 3.4; } return y; };
     const altoPie = () => pieLineas().length * 3.4;
     const inicio = doc.getNumberOfPages();
@@ -6800,7 +6804,7 @@ const VerifDian = (() => {
           return v ?? "";
         }));
         aoa.push([]);
-        m.pie.forEach((p) => aoa.push([p]));
+        pieArchivo(m).forEach((p) => aoa.push([p]));
       }
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       if (!m.error) m.filas.forEach((f, r) => {
@@ -10145,16 +10149,14 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
   /** Cierre de cada anexo: total relacionado, ajustes, valor declarado y diferencia. */
   function cierreRQ(aoa, total, ajustes, X, renglon, colValor) {
     const fila = (t, v) => { const r = Array(colValor + 1).fill(""); r[colValor - 1] = t; r[colValor] = v == null ? null : r2a(v); return r; };
+    // Al archivo que va a la DIAN solo va el total. Los ajustes, lo declarado y la diferencia se ven en la app (control interno).
     aoa.push([]);
-    aoa.push(fila("Total relacionado (contabilidad)", total));
+    aoa.push(fila("Total", total));
     let neto = total;
-    for (const [t, v] of ajustes) { aoa.push(fila(t, v)); neto += v; }
+    for (const [, v] of ajustes) neto += v;
     if (renglon) {
       const dec = X.R(renglon);
-      if (ajustes.length) aoa.push(fila("Total después de ajustes", neto));
-      aoa.push(fila(`Valor declarado renglón ${renglon}`, dec));
-      if (dec != null) aoa.push(fila(Math.abs(dec - neto) < 1000 ? "Diferencia (redondeo de la declaración a miles)" : "Diferencia por explicar (complete con la conciliación fiscal, formato 2516)", dec - neto));
-      return { total, neto, declarado: dec, dif: dec == null ? null : dec - neto, renglon };
+      return { total, neto, declarado: dec, dif: dec == null ? null : dec - neto, renglon, ajustes };
     }
     return { total, neto };
   }
@@ -10176,7 +10178,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     mayor(X) {
       const aoa = [["Cuenta", "Nombre de la cuenta", "Saldo inicial", "Débitos", "Créditos", "Saldo final"]];
       for (const cod of X.b.codigos) { const f = X.b.filas.get(cod); if (f.dig <= 4) aoa.push([cod, f.nombre, r2a(f.sa), r2a(f.d), r2a(f.c), r2a(f.ns)]); }
-      return [{ nombre: "Mayor y balances", titulo: `Mayor y balances (cuentas de mayor) a 31 de diciembre de ${X.y}. Soporte en Excel: la copia del libro oficial se imprime desde el software contable.`, aoa, anchos: [10, 40, 18, 18, 18, 18], resumen: { texto: "Resumen de saldos por cuenta de mayor; adjuntar la copia escaneada del libro oficial." } }];
+      return [{ nombre: "Mayor y balances", titulo: `Mayor y balances (cuentas de mayor) a 31 de diciembre de ${X.y}`, aoa, anchos: [10, 40, 18, 18, 18, 18], resumen: { texto: "Resumen de saldos por cuenta de mayor; adjuntar la copia escaneada del libro oficial." } }];
     },
     pasivos(X) {
       const rows = relacionRQ(X, pref(["2"]), (sa, d, c, ns) => -ns).filter((x) => Math.abs(x.ns) >= 0.5 || x.sinTercero);
@@ -10260,14 +10262,13 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       for (const [n, m] of xs) { aoa.push([n, dvNit(n), X.nom(n) || L.nits[n] || "", r2a(m.c), r2a(m.dv), r2a(m.c - m.dv)]); tc += m.c; td += m.dv; }
       aoa.push([], ["", "", "Total", r2a(tc), r2a(td), r2a(tc - td)]);
       const ii = X.val("14", "sa"), iff = X.val("14", "ns"), costoJuego = ii + tc - td - iff, costo = X.val("6") + X.val("7"), dec = X.R(62);
-      const j = [["Juego de inventarios", ""], ["Inventario inicial (1 de enero)", r2a(ii)], ["(+) Compras", r2a(tc)], ["(−) Devoluciones en compras", r2a(-td)], ["(−) Inventario final (31 de diciembre)", r2a(-iff)], ["= Costo de ventas por juego de inventarios", r2a(costoJuego)], [],
-        ["Costo de ventas en la contabilidad (cuentas 6 y 7)", r2a(costo)], ["Diferencia: otros movimientos del inventario (detalle abajo)", r2a(costo - costoJuego)], ["Costo declarado (renglón 62)", dec], [],
-        ["Otros movimientos del inventario por tipo de comprobante", ""], ["Tipo", "Débitos (entradas)", "Créditos (salidas)", "Neto"]];
-      for (const [t, o] of [...otros].sort((a, b) => b[1].c - a[1].c)) j.push([`${t} · ${tipos[t] || ""}`, r2a(o.d), r2a(o.c), r2a(o.d - o.c)]);
-      j.push([], ["Control: inventario inicial + compras netas + otros movimientos netos = inventario final", r2a(ii + tc - td + [...otros.values()].reduce((s, o) => s + o.d - o.c, 0)), "Inventario final", r2a(iff)]);
+      const j = [["Juego de inventarios", ""], ["Inventario inicial (1 de enero)", r2a(ii)], ["(+) Compras", r2a(tc)], ["(−) Devoluciones en compras", r2a(-td)], ["(−) Inventario final (31 de diciembre)", r2a(-iff)], ["= Costo de ventas por juego de inventarios", r2a(costoJuego)]];
+      const otrosNeto = [...otros.values()].reduce((s, o) => s + o.d - o.c, 0);
+      const controlJ = [`Costo de ventas en la contabilidad (cuentas 6 y 7) ${fmt(costo)}; por juego de inventarios ${fmt(costoJuego)}; diferencia ${fmt(costo - costoJuego)} (otros movimientos del inventario${otros.size ? ": " + [...otros].sort((a, b) => b[1].c - a[1].c).slice(0, 6).map(([t, o]) => `${tipos[t] || t} ${fmt(o.d - o.c)}`).join(", ") : ""}). Costo declarado en el renglón 62: ${dec == null ? "sin declaración cargada" : fmt(dec)}.`,
+        `Cuadre del inventario: inicial + compras netas + otros movimientos = ${fmt(ii + tc - td + otrosNeto)} frente a inventario final ${fmt(iff)}.`];
       return [
         { nombre: "R39 Compras", titulo: `Compras de inventarios por proveedor, del 1 de enero al 31 de diciembre de ${X.y} (comprobantes de compra, gastos y documento soporte que afectan la cuenta 14)`, aoa, anchos: [13, 4, 44, 18, 18, 18], resumen: { total: tc - td, texto: `${fmt(xs.length)} proveedores; compras netas ${fmt(tc - td)}.` } },
-        { nombre: "R39 Juego inventarios", titulo: `Cálculo del costo de ventas por juego de inventarios – ${X.y}`, aoa: j, anchos: [70, 20, 20, 20], resumen: { texto: `Inventario inicial ${fmt(ii)}, final ${fmt(iff)}; costo por juego ${fmt(costoJuego)} frente a ${fmt(costo)} en la contabilidad.` } },
+        { control: controlJ, nombre: "R39 Juego inventarios", titulo: `Cálculo del costo de ventas por juego de inventarios – ${X.y}`, aoa: j, anchos: [70, 20, 20, 20], resumen: { texto: `Inventario inicial ${fmt(ii)}, final ${fmt(iff)}; costo por juego ${fmt(costoJuego)} frente a ${fmt(costo)} en la contabilidad.` } },
       ];
     },
     costos(X, it) {
@@ -10315,9 +10316,8 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       let total = 0;
       for (const m of xs) { aoa.push([m.nit, dvNit(m.nit), X.nom(m.nit) || L.nits[m.nit] || "", m.conc, r2a(m.base), r2a(m.v), "POR ADJUNTAR"]); total += m.v; }
       const resumen = cierreRQ(aoa, total, [], X, 106, 5);
-      aoa.push([], ["Movimientos de la cuenta no incluidos en la relación:"], ["", "", "", "Notas de contabilidad (liquidación de autorretención y aplicación a la declaración)", "", r2a(nota)]);
-      if (propio) aoa.push(["", "", "", "Movimientos con el NIT de la propia empresa o con la DIAN", "", r2a(propio)]);
-      return [{ nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.` } }];
+      const control = [`No incluidos en la relación: notas de contabilidad (liquidación de autorretención y aplicación a la declaración) ${fmt(nota)}${propio ? `; movimientos con el NIT de la propia empresa o con la DIAN ${fmt(propio)}` : ""}.`];
+      return [{ control, nombre: "R106 Otras retenciones", titulo: `Renglón 106 – Otras retenciones del año ${X.y} por agente retenedor (cuentas ${[...ctas].join(", ")})`, aoa, anchos: [13, 4, 44, 40, 18, 16, 16], resumen: { ...resumen, texto: `${fmt(new Set(xs.map((m) => m.nit)).size)} agentes retenedores.` } }];
     },
     certificados(X) {
       const M = new Map();
@@ -10332,19 +10332,18 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       for (const [n, m] of [...M]) if (!(FIN.test(X.nom(n)) && !/UNIVERSIDAD|SEGUROS/i.test(X.nom(n)) && (m.intereses + m.comisiones + m.gmf >= 1000 || m.obligaciones >= 1000))) M.delete(n);
       const aoa = [["NIT", "DV", "Entidad", "Obligaciones a 31-dic", "Intereses", "Comisiones y gastos bancarios", "GMF", "Total deducido"]];
       for (const [n, m] of [...M].sort((a, b) => b[1].intereses + b[1].comisiones + b[1].gmf - (a[1].intereses + a[1].comisiones + a[1].gmf))) aoa.push([n, dvNit(n), X.nom(n), r2a(m.obligaciones), r2a(m.intereses), r2a(m.comisiones), r2a(m.gmf), r2a(m.intereses + m.comisiones + m.gmf)]);
-      aoa.push([], ["Además de los bancos, revise si hubo pagos a otras entidades financieras (leasing, fiducias, datáfonos) que deban certificar intereses o comisiones."]);
-      const hojas = [{ nombre: "Certificados financieros", titulo: `Entidades financieras con obligaciones o gastos financieros en ${X.y}`, aoa, anchos: [13, 4, 40, 18, 16, 18, 16, 16], resumen: { texto: `${fmt(M.size)} entidades financieras` } }];
+      const hojas = [{ control: ["Además de los bancos, revise si hubo pagos a otras entidades financieras (leasing, fiducias, datáfonos) que deban certificar intereses o comisiones."], nombre: "Certificados financieros", titulo: `Entidades financieras con obligaciones o gastos financieros en ${X.y}`, aoa, anchos: [13, 4, 40, 18, 16, 18, 16, 16], resumen: { texto: `${fmt(M.size)} entidades financieras` } }];
       const R = retenedoresRQ(X);
       if (R) {
         hojas[0].resumen.texto += ` y ${fmt(R.filas.length)} agentes que practicaron retención (renta ${fmt(R.tot.renta)}).`;
-        hojas.push({ nombre: "Agentes retenedores", titulo: `Terceros que practicaron retención a la sociedad en ${X.y} (retención en la fuente, IVA e ICA)`, aoa: R.aoa, anchos: [13, 4, 44, 18, 16, 16, 18], resumen: { total: R.tot.renta, declarado: X.R(106), renglon: 106, texto: `${fmt(R.filas.length)} agentes retenedores.` } });
-      } else hojas[0].aoa.push([], ["Para listar los terceros que practicaron retención (nombre, NIT y valor), cargue el libro auxiliar del año en Consulta de movimientos."]);
+        hojas.push({ control: R.control, nombre: "Agentes retenedores", titulo: `Terceros que practicaron retención a la sociedad en ${X.y} (retención en la fuente, IVA e ICA)`, aoa: R.aoa, anchos: [13, 4, 44, 18, 16, 16, 18], resumen: { total: R.tot.renta, declarado: X.R(106), renglon: 106, texto: `${fmt(R.filas.length)} agentes retenedores.` } });
+      } else hojas[0].control.push("Para listar los terceros que practicaron retención (nombre, NIT y valor), cargue el libro auxiliar del año en Consulta de movimientos.");
       return hojas;
     },
     cambio(X) {
       const ctas = X.b.codigos.filter((c) => /DIFERENCIA EN CAMBIO/i.test(X.cta(c)) || /^(421020|530525)/.test(c)).filter((c) => { const f = X.b.filas.get(c); return Math.abs(f.d) + Math.abs(f.c) + Math.abs(f.ns) >= 0.5; });
       const aoa = ctas.length ? [["Cuenta", "Nombre", "Débitos", "Créditos", "Saldo"], ...ctas.map((c) => { const f = X.b.filas.get(c); return [c, f.nombre, r2a(f.d), r2a(f.c), r2a(f.ns)]; })]
-        : [[`Durante el año gravable ${X.y} la contabilidad no registra diferencia en cambio: no hay movimientos en cuentas de diferencia en cambio (421020 ingreso, 530525 gasto) ni otras cuentas con ese nombre.`], ["Verifique que la sociedad no tuvo operaciones en moneda extranjera (compras o pagos en dólares) antes de responder."]];
+        : [[`Durante el año gravable ${X.y} la contabilidad no registra diferencia en cambio: no hay movimientos en cuentas de diferencia en cambio (421020 ingreso, 530525 gasto) ni otras cuentas con ese nombre.`]];
       return [{ nombre: "Diferencia en cambio", titulo: `Diferencia en cambio ${X.y}`, aoa, anchos: ctas.length ? [11, 40, 18, 18, 18] : [140], resumen: { texto: ctas.length ? `${ctas.length} cuentas con movimiento: requiere el cuadro con facturas, TRM y pagos.` : "Sin diferencia en cambio registrada.", sinMovimiento: !ctas.length } }];
     },
     eeff: () => [], otro: () => [],
@@ -10372,11 +10371,11 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     const aoa = [["NIT", "DV", "Nombre o razón social", "Retención en la fuente (renta)", "Base", "Retención de IVA", "Retención de ICA"],
       ...filas.map(([n, m]) => [n, dvNit(n), X.nom(n) || L.nits[n] || "", r2a(m.renta), r2a(m.base), r2a(m.iva), r2a(m.ica)]),
       [], ["", "", "Total", r2a(tot.renta), r2a(tot.base), r2a(tot.iva), r2a(tot.ica)]];
-    const dec = X.R(106);
-    if (dec != null) aoa.push(["", "", "Otras retenciones declaradas (renglón 106)", dec], ["", "", Math.abs(dec - tot.renta) < 1000 ? "Diferencia (redondeo)" : "Diferencia por explicar", r2a(dec - tot.renta)]);
-    if (Math.abs(dian) >= 0.5) aoa.push(["", "", "Movimientos con la DIAN en estas cuentas (no son retenciones de terceros)", r2a(dian)]);
-    aoa.push([], ["No incluye las notas de contabilidad (liquidación de la autorretención y aplicación a la declaración) ni los movimientos con el NIT de la propia empresa."]);
-    return { filas, tot, aoa };
+    const dec = X.R(106), control = [];
+    if (dec != null) control.push(`Agentes retenedores: retención en la fuente ${fmt(tot.renta)} frente a ${fmt(dec)} declarados en el renglón 106 (diferencia ${fmt(dec - tot.renta)}).`);
+    if (Math.abs(dian) >= 0.5) control.push(`Movimientos con la DIAN en las cuentas de retención (no son retenciones de terceros): ${fmt(dian)}.`);
+    control.push("La relación no incluye las notas de contabilidad (liquidación de la autorretención y aplicación a la declaración) ni los movimientos con el NIT de la propia empresa.");
+    return { filas, tot, aoa, control };
   }
 
   async function anexosRQ(q, soloN) {
@@ -10388,6 +10387,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       try { for (const h of GEN_RQ[it.tipo](X, it)) hojas.push({ ...h, it }); }
       catch (err) { hojas.push({ it, error: err.message }); }
     }
+    if (soloN == null) RQ.controles = { ...(RQ.controles || {}), [q.numero]: { hojas, fecha: new Date().toISOString() } };
     return { X, hojas };
   }
   /* ---------- archivos para la DIAN: un archivo por numeral y un ZIP con todo */
@@ -10401,7 +10401,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
   function libroRQ(q, hojas, conIndice, soloIndice = false) {
     const e = S.cfg.empresa, wb = XLSX.utils.book_new(), usados = new Set(), idx = [];
     for (const h of hojas) {
-      if (h.error) { idx.push([h.it.n, textoItem(h.it, q), "", null, null, null, h.error]); continue; }
+      if (h.error) continue; // lo que no se pudo generar se informa en la app, no en el archivo
       let nom = (conIndice ? `N${h.it.n} ${h.nombre}` : h.nombre).slice(0, 31); let k = 2; while (usados.has(nom)) nom = `${nom.slice(0, 28)} ${k++}`; usados.add(nom);
       if (soloIndice) nom = nombreArchRQ(q, h.it, "xlsx") + (hojas.filter((x) => x.it === h.it).length > 1 ? ` · hoja ${h.nombre}` : "");
       else {
@@ -10409,14 +10409,13 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         ws["!cols"] = h.anchos.map((w) => ({ wch: w }));
         XLSX.utils.book_append_sheet(wb, ws, nom);
       }
-      const r = h.resumen || {};
-      idx.push([h.it.n, textoItem(h.it, q).slice(0, 250), nom, r.neto ?? r.total ?? null, r.declarado ?? null, r.dif ?? null, r.texto || ""]);
+      idx.push([h.it.n, textoItem(h.it, q).slice(0, 250), nom]);
     }
     if (conIndice) {
-      for (const it of q.items) if (it.estado !== "noaplica" && (it.tipo === "eeff" || it.tipo === "otro")) idx.push([it.n, textoItem(it, q).slice(0, 250), "", null, null, null, it.tipo === "eeff" ? `Archivo ${nombreArchRQ(q, it, "pdf")}: imprimir, firmar y escanear.` : "Documento por adjuntar."]);
+      for (const it of q.items) if (it.estado !== "noaplica" && (it.tipo === "eeff" || it.tipo === "otro")) idx.push([it.n, textoItem(it, q).slice(0, 250), it.tipo === "eeff" ? nombreArchRQ(q, it, "pdf") : "Documento adjunto"]);
       idx.sort((a, b) => a[0] - b[0]);
-      const wi = XLSX.utils.aoa_to_sheet([[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero} – ${q.impuesto} año gravable ${q.anio}`], [], ["Numeral", "Solicitud", "Hoja o archivo", "Total relacionado", "Valor declarado", "Diferencia", "Observación"], ...idx]);
-      wi["!cols"] = [8, 70, soloIndice ? 60 : 26, 18, 18, 16, 60].map((w) => ({ wch: w }));
+      const wi = XLSX.utils.aoa_to_sheet([[e.razon], [`NIT ${e.nit}`], [`Respuesta al requerimiento ordinario No. ${q.numero} – ${q.impuesto} año gravable ${q.anio}`], [], ["Numeral", "Solicitud", "Hoja o archivo"], ...idx]);
+      wi["!cols"] = [8, 90, soloIndice ? 60 : 30].map((w) => ({ wch: w }));
       XLSX.utils.book_append_sheet(wb, wi, "Indice");
       if (!soloIndice) wb.SheetNames.unshift(wb.SheetNames.pop());
     }
@@ -10551,7 +10550,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       add(`00_Carta_respuesta_${q.numero}.doc`, texto("﻿" + html));
       faltan.push("Certificado de existencia y representación legal (para acreditar la representación, arts. 555 y 559 E.T.).", "Revisar la carta: completar los campos [COMPLETAR], firmar y enviar en PDF.");
       const venc = venceRQ(q);
-      add("LEAME_que_falta_adjuntar.txt", texto(`Requerimiento ordinario No. ${q.numero} – ${q.impuesto} año gravable ${q.anio}\n${venc ? `Plazo: ${fechaLarga(venc)}\n` : ""}Responder a: ${q.correo || ""}${q.copia ? ` con copia a ${q.copia}` : ""}\nAsunto: Respuesta Requerimiento Ordinario No. ${q.numero}${q.proyecto ? ` – Proyectó: ${q.proyecto}` : ""}\n\nArchivos generados por la app: numerales ${hechos.join(", ") || "—"}.\n\nPendiente antes de enviar:\n${faltan.map((f) => `- ${f}`).join("\n")}\n`));
+      RQ.pendientes = { ...(RQ.pendientes || {}), [q.numero]: { hechos: [...hechos], faltan: [...faltan], fecha: new Date().toISOString() } };
       const data = CFB.write(zip, { fileType: "zip", type: "array", compression: true });
       RQ.ocupado = ""; render();
       await guardarArchivo(`${carpeta}.zip`, new Uint8Array(data));
@@ -10789,12 +10788,12 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           case "eeff": t = `Se adjuntan los estados financieros del año gravable ${q.anio} (estado de situación financiera, estado de resultado integral, estado de cambios en el patrimonio, estado de flujos de efectivo y notas), firmados por el representante legal, el contador y el revisor fiscal.`; break;
           case "mayor": t = `Se adjunta copia escaneada del libro mayor y balances a 31 de diciembre de ${q.anio}, firmado, y los mismos saldos en Excel.`; break;
           case "balance": t = `Se adjunta en Excel el balance de prueba a 8 dígitos por tercero del 1 de enero al 31 de diciembre de ${q.anio}. ${r.texto || ""}`; break;
-          case "pasivos": t = `Se adjunta en Excel la relación de los saldos adeudados a 31 de diciembre de ${q.anio} por tercero, con la fecha de inicio de cada obligación, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 45${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}.`; break;
-          case "ingresos": t = `Se adjunta en Excel la relación de los ingresos brutos por tercero acumulados a 31 de diciembre de ${q.anio}, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 58.`; break;
-          case "devoluciones": t = `Se adjunta en Excel la relación de las devoluciones, rebajas y descuentos en ventas por tercero, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 59.`; break;
-          case "compras": { const j = hs[1]?.resumen?.texto || ""; t = `Se adjunta en Excel la relación de compras de inventarios por proveedor del 1 de enero al 31 de diciembre de ${q.anio}, por ${m(r.total)}, y el cálculo del costo de ventas por juego de inventarios. ${j}`; break; }
-          case "costos": t = `Se adjunta en Excel, en un archivo por cada renglón de la declaración, la relación de los costos y gastos por concepto y tercero: ${hs.map((h) => `renglón ${h.resumen.renglon} ${m(h.resumen.neto)} (declarado ${m(h.resumen.declarado)})`).join("; ")}. En cada hoja se parte del valor contable y se muestra la conciliación con el valor declarado; la diferencia corresponde a [COMPLETAR: partidas no deducibles y ajustes fiscales, según la conciliación fiscal – formato 2516].`; break;
-          case "retenciones": t = `Se adjunta en Excel la relación de las otras retenciones por agente retenedor, con el concepto, la base y el valor retenido, que suma ${m(r.neto)} frente a ${m(r.declarado)} declarados en el renglón 106${r.dif != null && Math.abs(r.dif) >= 1000 ? ` [COMPLETAR: explicar la diferencia de ${m(r.dif)}]` : ""}, junto con los certificados de retención expedidos por los agentes retenedores.`; break;
+          case "pasivos": t = `Se adjunta en Excel la relación de los saldos adeudados a 31 de diciembre de ${q.anio} por tercero, con la fecha de inicio de cada obligación, por un total de ${m(r.total)}.`; break;
+          case "ingresos": t = `Se adjunta en Excel la relación de los ingresos brutos por tercero acumulados a 31 de diciembre de ${q.anio}, por un total de ${m(r.total)}.`; break;
+          case "devoluciones": t = `Se adjunta en Excel la relación de las devoluciones, rebajas y descuentos en ventas por tercero, por un total de ${m(r.total)}.`; break;
+          case "compras": t = `Se adjunta en Excel la relación de compras de inventarios por proveedor del 1 de enero al 31 de diciembre de ${q.anio}, por ${m(r.total)}, y el cálculo del costo de ventas por juego de inventarios.`; break;
+          case "costos": t = `Se adjunta en Excel, en un archivo por cada renglón de la declaración, la relación de los costos y gastos por concepto y tercero: ${hs.map((h) => `renglón ${h.resumen.renglon}, ${m(h.resumen.total)}`).join("; ")}.`; break;
+          case "retenciones": t = `Se adjunta en Excel la relación de las otras retenciones por agente retenedor, con el concepto, la base y el valor retenido, por un total de ${m(r.total)}, junto con los certificados de retención expedidos por los agentes retenedores.`; break;
           case "certificados": t = `Se adjuntan copias de los certificados tributarios anuales expedidos por las entidades financieras (${(r.texto || "").replace(/\.$/, "")}) que soportan lo deducido por intereses, comisiones, servicios y GMF.`; break;
           case "cambio": t = r.sinMovimiento ? `Durante el año gravable ${q.anio} la sociedad no realizó operaciones en moneda extranjera; por lo tanto, no registró diferencia en cambio realizada ni no realizada. Se adjunta la certificación firmada por el representante legal, el contador y el revisor fiscal.` : `Se adjunta el cuadro explicativo de la diferencia en cambio realizada y no realizada con sus auxiliares y soportes.`; break;
           default: t = "Se adjunta la información solicitada.";
@@ -10884,6 +10883,31 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       </tbody></table></div>
       <div class="fila" style="margin-top:12px"><button class="btn primario" data-rq="crear">Crear requerimiento</button><button class="btn" data-rq="cancelar-nuevo">Cancelar</button></div></section>`;
   }
+  /** Cuadres contra la declaración, avisos y pendientes: solo en la app, nunca en los archivos que se envían a la DIAN. */
+  function controlRQ(q) {
+    const C = RQ.controles?.[q.numero], P = RQ.pendientes?.[q.numero];
+    const boton = `<button class="btn chico" data-rq="control" data-id="${esc(q.numero)}">${C ? "Volver a revisar" : "Revisar cuadres"}</button>`;
+    if (!C && !P) return `<section class="panel"><div class="fila" style="justify-content:space-between"><div><h2>Control interno</h2><p class="sub" style="margin:0">Cuadre de cada anexo contra la declaración y lo que falta antes de enviar. Se ve solo aquí: no sale en los archivos para la DIAN.</p></div>${boton}</div></section>`;
+    const li = [];
+    for (const h of C?.hojas || []) {
+      const t = `N.° ${h.it.n} · ${h.nombre || TIPO_RQ[h.it.tipo] || ""}`;
+      if (h.error) { li.push(["error", t, esc(h.error)]); continue; }
+      const r = h.resumen || {};
+      if (r.renglon && r.declarado != null) {
+        const ok = Math.abs(r.dif) < 1000;
+        li.push([ok ? "ok" : "advertencia", t, `total ${fmt(r.total)}${(r.ajustes || []).length ? ` · ${r.ajustes.map(([x, v]) => `${esc(x)} ${fmt(v)}`).join(" · ")} · neto ${fmt(r.neto)}` : ""} · declarado en el renglón ${r.renglon}: ${fmt(r.declarado)} · diferencia <b>${fmt(r.dif)}</b>${ok ? " (redondeo)" : ""}`]);
+      } else if (r.renglon) li.push(["info", t, `total ${fmt(r.total)} · sin declaración de renta ${q.anio} cargada para comparar con el renglón ${r.renglon}`]);
+      for (const c of h.control || []) li.push(["info", t, esc(c)]);
+    }
+    for (const f of P?.faltan || []) li.push(["advertencia", "Pendiente antes de enviar", esc(f)]);
+    return `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start"><div><h2>Control interno</h2><p class="sub" style="margin:0">Solo se ve aquí: los archivos para la DIAN llevan únicamente la información pedida y su total.</p></div>${boton}</div>
+      <ul class="hallazgos" style="margin-top:10px">${li.map(([c, t, d]) => `<li><span class="chip ${c}">${{ ok: "Cuadra", advertencia: "Revisar", info: "Dato", error: "No se generó" }[c]}</span><b>${esc(t)}.</b> ${d}</li>`).join("") || "<li>Sin observaciones.</li>"}</ul></section>`;
+  }
+  async function revisarRQ(q) {
+    try { RQ.error = ""; RQ.ocupado = "Revisando los cuadres de los anexos…"; render(); await libreriasRQ(false); await anexosRQ(q); }
+    catch (err) { console.error(err); RQ.error = `No se pudo revisar: ${err.message}`; }
+    RQ.ocupado = ""; render();
+  }
   function detalleRQ(q) {
     const y = q.anio, tieneAn = AN.docs.has(y), tieneLibro = unidadesCQ(y).length > 0, decl = rentaVigente(y);
     const falta = (ok, t, link) => `<li>${ok ? '<span class="chip ok">Cargado</span>' : '<span class="chip advertencia">Falta</span>'} ${t}${ok ? "" : ` — <a href="#" data-nav="${link}">cargar</a>`}</li>`;
@@ -10893,10 +10917,11 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         <div class="fila"><button class="btn primario" data-rq="zip" data-id="${esc(q.numero)}">Descargar todo (ZIP)</button><button class="btn" data-rq="excel" data-id="${esc(q.numero)}">Anexos en un solo Excel</button><button class="btn" data-rq="carta" data-id="${esc(q.numero)}">Carta de respuesta (Word)</button>
           ${q.pdf ? `<button class="btn" data-rq="pdf" data-id="${esc(q.numero)}">PDF recibido</button>` : `<button class="btn" data-rq="subir-pdf">Guardar el PDF recibido</button>`}</div></div>
       <div class="cq-filtros" style="margin-top:12px">${inp("fecha", "Fecha del requerimiento", "date")}${inp("notificado", "Fecha de notificación", "date")}${inp("plazo", "Plazo (días calendario)", "number")}${inp("expediente", "Expediente")}${inp("proyecto", "Funcionario que proyectó")}${inp("correo", "Correo de respuesta")}${inp("copia", "Con copia a")}${inp("radicado", "Radicado de la respuesta")}</div>
-      <p class="pie"><b>Descargar todo (ZIP)</b> trae un archivo por numeral con el nombre que pide la DIAN, la carta de respuesta y una lista de lo que falta adjuntar (firmas, escaneos y certificados). Vence a los ${q.plazo || 15} días calendario de la notificación${venceRQ(q) ? `: <b>${esc(fechaLarga(venceRQ(q)))}</b>` : ""}. No responder a tiempo acarrea la sanción del artículo 651 del Estatuto Tributario.</p>
+      <p class="pie"><b>Descargar todo (ZIP)</b> trae un archivo por numeral con el nombre que pide la DIAN, el índice y la carta de respuesta: solo la información pedida, sin cuadres internos. Lo que falta adjuntar (firmas, escaneos y certificados) y los cuadres contra la declaración se ven abajo, en <b>Control interno</b>. Vence a los ${q.plazo || 15} días calendario de la notificación${venceRQ(q) ? `: <b>${esc(fechaLarga(venceRQ(q)))}</b>` : ""}. No responder a tiempo acarrea la sanción del artículo 651 del Estatuto Tributario.</p>
       ${(q.avisos || []).length || q.leidoOCR ? `<div class="aviso ${(q.avisos || []).length ? "advertencia" : "info"}" style="margin-top:10px"><p>${q.leidoOCR ? "Datos leídos del PDF escaneado con OCR: revise número, fechas, correos y el texto de cada numeral. " : ""}${(q.avisos || []).map(esc).join(" ")}</p></div>` : ""}
       ${q.textoLeido ? `<details class="conf" style="margin-top:8px"><summary>Texto leído del requerimiento</summary><div><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(q.textoLeido)}</pre></div></details>` : ""}
       <h3 style="margin:14px 0 6px">Información del año ${y} que usan los anexos</h3><ul class="hallazgos">${falta(tieneAn, `Balance por tercero ${y} (Años cerrados)`, "anual:cargar")}${falta(tieneLibro, `Libro auxiliar ${y} (para pasivos, compras y retenciones)`, "consulta:resumen")}${falta(Boolean(decl), `Declaración de renta ${y}${decl ? ` (formulario ${esc(decl.formulario)})` : ""}`, "renta")}</ul></section>
+      ${controlRQ(q)}
       <section class="panel"><h2>Lo que pide la DIAN</h2><p class="sub">Cada numeral con el documento que lo responde. Descárguelo con el botón de la derecha; el estado pasa a «En proceso» y usted lo marca «Listo» cuando esté revisado.</p>
       <div class="fila" style="margin:4px 0 10px;gap:8px;flex-wrap:wrap"><span class="pie" style="margin:0">¿Faltan numerales?</span>
         ${q.textoLeido ? `<button class="btn chico" data-rq="releer" data-id="${esc(q.numero)}">Volver a leer los numerales del PDF</button>` : ""}
@@ -10924,6 +10949,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     else if (a === "crear") crearRQ();
     else if (a === "abrir") { RQ.sel = t.dataset.id; RQ.nuevo = null; RQ.error = ""; render(); }
     else if (a === "excel" && q) excelRQ(q);
+    else if (a === "control" && q) revisarRQ(q);
     else if (a === "archivo-n" && q) archivoNumeralRQ(q, Number(t.dataset.n));
     else if (a === "archivo-r" && q) archivoRenglonRQ(q, Number(t.dataset.n), Number(t.dataset.r));
     else if (a === "zip" && q) zipRQ(q);
