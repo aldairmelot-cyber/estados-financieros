@@ -10434,17 +10434,19 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
   const nrmRQ = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
   /** Tipo de anexo según el texto del numeral. */
   function tipoNumeralRQ(t) {
-    const x = nrmRQ(t);
-    if (/estados? financieros/.test(x)) return "eeff";
-    if (/libro mayor/.test(x)) return "mayor";
-    if (/balance de prueba/.test(x)) return "balance";
-    if (/renglon(es)? 106|otras retenciones/.test(x)) return "retenciones";
-    if (/renglon(es)? ?45\b|valor total de los pasivos/.test(x)) return "pasivos";
-    if (/ingresos brutos|renglon 58\b/.test(x)) return "ingresos";
-    if (/devoluciones|renglon 59\b/.test(x)) return "devoluciones";
-    if (/compras de inventario|renglon 39\b/.test(x)) return "compras";
-    if (/renglon(es)?\s*6[2-6]\b/.test(x)) return "costos";
-    if (/certificados? anuales? tributari|entidades financieras/.test(x)) return "certificados";
+    // Texto normalizado: sin tildes, espacios y saltos de línea unificados, y "renglón" tal como lo deja el OCR (rengl6n, renglon45…).
+    const x = nrmRQ(t).replace(/\s+/g, " ").replace(/rengl\S{0,2}n(es)?\s*(?=\d)/g, "renglon ").replace(/casillas?\s*(?=\d)/g, "renglon ");
+    const R = (n) => new RegExp(`renglon(es)? ?(no\\.? ?)?${n}\\b`);
+    if (/estados? financier/.test(x)) return "eeff";
+    if (/libro (de )?mayor|mayor y balances/.test(x)) return "mayor";
+    if (/balance (de )?(prueba|comprobacion)|balance por (tercero|nit)|balance de terceros/.test(x)) return "balance";
+    if (R(106).test(x) || /otras retenciones/.test(x)) return "retenciones";
+    if (R(45).test(x) || /valor total de los pasivos|total (de )?pasivos|relacion de (los )?pasivos/.test(x)) return "pasivos";
+    if (R(58).test(x) || /ingresos brutos/.test(x)) return "ingresos";
+    if (R(59).test(x) || /devoluciones/.test(x)) return "devoluciones";
+    if (R(39).test(x) || /compras de inventario|juego de inventario|inventario (inicial|final)/.test(x)) return "compras";
+    if (/renglon(es)? ?6[2-6]\b/.test(x) || /costos y (gastos|deducciones)|costos de venta|gastos de (administracion|ventas|distribucion)|gastos financieros|otros gastos y deducciones/.test(x)) return "costos";
+    if (/certificados? (anuales? )?tributari|entidades financieras/.test(x)) return "certificados";
     if (/diferencia en cambio/.test(x)) return "cambio";
     return "otro";
   }
@@ -10761,7 +10763,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       <section class="panel"><h2>Lo que pide la DIAN</h2><p class="sub">Cada numeral con el documento que lo responde. Descárguelo con el botón de la derecha; el estado pasa a «En proceso» y usted lo marca «Listo» cuando esté revisado.</p>
       <div class="tabla-env"><table class="lista cq rq-tabla"><thead><tr><th>N.°</th><th>Solicitud de la DIAN</th><th>Estado y responsable</th><th class="num">Documento</th></tr></thead><tbody>
       ${q.items.map((it, i) => { const fmtN = formatoNumeralRQ(it, null); const arch = fmtN ? nombreArchRQ(q, it, it.tipo === "cambio" ? "pdf" : fmtN) : ""; return `<tr><td><b>${it.n}</b></td>
-        <td class="cq-conc" style="max-width:520px">${esc(textoItem(it, q))}<small>${esc(TIPO_RQ[it.tipo] || it.tipo)}${it.tipo === "costos" ? ` · renglones <input type="text" data-rqi="${i}" data-k="renglones" value="${esc(it.renglones || "")}" style="width:120px;padding:1px 4px" aria-label="Renglones">` : ""}</small>
+        <td class="cq-conc" style="max-width:520px">${esc(textoItem(it, q))}<small><select data-rqi="${i}" data-k="tipo" aria-label="Anexo que responde este numeral" title="Anexo que responde este numeral" style="padding:1px 4px;margin:2px 0">${Object.entries(TIPO_RQ).map(([k, t]) => `<option value="${k}" ${it.tipo === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>${it.tipo === "costos" ? ` · renglones <input type="text" data-rqi="${i}" data-k="renglones" value="${esc(it.renglones || "")}" style="width:120px;padding:1px 4px" aria-label="Renglones">` : ""}</small>
           <textarea data-rqi="${i}" data-k="notas" rows="1" placeholder="Notas" style="width:100%;margin-top:4px" aria-label="Notas">${esc(it.notas || "")}</textarea></td>
         <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select>
           <input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" placeholder="Responsable" style="width:130px;margin-top:4px;display:block" aria-label="Responsable"></td>
@@ -10798,7 +10800,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     if (el.dataset.rqni !== undefined) { const it = RQ.nuevo.items[Number(el.dataset.rqni)]; it[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; return true; }
     if (el.dataset.rqn) { RQ.nuevo[el.dataset.rqn] = el.value; if (el.dataset.rqn === "fecha" && !RQ.nuevo.notificado) RQ.nuevo.notificado = el.value; if (el.type === "date") render(); return true; }
     const q = RQ.docs.get(RQ.sel); if (!q) return false;
-    if (el.dataset.rqi !== undefined) { const it = q.items[Number(el.dataset.rqi)]; it[el.dataset.k] = el.value; guardarRQ(q).then(() => { if (el.tagName === "SELECT") render(); }); return true; }
+    if (el.dataset.rqi !== undefined) { const it = q.items[Number(el.dataset.rqi)]; it[el.dataset.k] = el.value; if (el.dataset.k === "tipo") it.tipoManual = true; guardarRQ(q).then(() => { if (el.tagName === "SELECT") render(); }); return true; }
     if (el.dataset.rqc) { q[el.dataset.rqc] = el.dataset.rqc === "plazo" ? Number(el.value) : el.value; guardarRQ(q).then(render); return true; }
     return false;
   }
@@ -11091,7 +11093,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     }, () => {});
     db.collection("requerimientos").onSnapshot((snap) => {
       const prev = S.rq.docs;
-      S.rq.docs = new Map(snap.docs.map((d) => { const x = d.data(); x.anio = Number(x.anio); if (prev.get(d.id)?._pdf) x._pdf = prev.get(d.id)._pdf; return [d.id, x]; }));
+      S.rq.docs = new Map(snap.docs.map((d) => { const x = d.data(); x.anio = Number(x.anio); x.items = (x.items || []).map((it) => { if (it.tipo !== "otro" || it.tipoManual) return it; const tipo = tipoNumeralRQ(it.texto); return tipo === "otro" ? it : { ...it, tipo, renglones: tipo === "costos" && !it.renglones ? [...new Set((String(it.texto).slice(0, 120).match(/\b6[2-6]\b/g) || []))].join(", ") : it.renglones }; }); if (prev.get(d.id)?._pdf) x._pdf = prev.get(d.id)._pdf; return [d.id, x]; }));
       const ae = document.activeElement;
       if (!S.cargando && S.tab === "req" && !S.rq.ocupado && !(ae && (ae.dataset?.rqi !== undefined || ae.dataset?.rqc || ae.dataset?.rqn || ae.dataset?.rqni !== undefined))) render();
     }, () => {});
