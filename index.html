@@ -11130,6 +11130,12 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     db.collection("requerimientos").onSnapshot((snap) => {
       const prev = S.rq.docs;
       S.rq.docs = new Map(snap.docs.map((d) => { const x = d.data(); x.anio = Number(x.anio); x.items = (x.items || []).map((it) => { if (it.tipo !== "otro" || it.tipoManual) return it; const tipo = tipoNumeralRQ(it.texto); return tipo === "otro" ? it : { ...it, tipo, renglones: tipo === "costos" && !it.renglones ? [...new Set((String(it.texto).slice(0, 120).match(/\b6[2-6]\b/g) || []))].join(", ") : it.renglones }; }); if (prev.get(d.id)?._pdf) x._pdf = prev.get(d.id)._pdf; return [d.id, x]; }));
+      // Requerimientos que quedaron con un solo numeral: se vuelven a leer solos del texto guardado.
+      for (const x of S.rq.docs.values()) {
+        if ((x.items || []).length > 1 || !x.textoLeido || S.rq.releidos?.has(x.numero)) continue;
+        (S.rq.releidos ||= new Set()).add(x.numero);
+        try { if (parsearRQ(x.textoLeido, "").items.length > 1) setTimeout(() => reemplazarNumeralesRQ(x, "releer"), 0); } catch (err) { console.error(err); }
+      }
       const ae = document.activeElement;
       if (!S.cargando && S.tab === "req" && !S.rq.ocupado && !(ae && (ae.dataset?.rqi !== undefined || ae.dataset?.rqc || ae.dataset?.rqn || ae.dataset?.rqni !== undefined))) render();
     }, () => {});
