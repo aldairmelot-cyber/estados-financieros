@@ -222,7 +222,7 @@ table.ef tr.control td { color: var(--suave); font-size: 12px; border-bottom: 0;
 .firmas b { display: block; font-weight: 600; }
 .firmas span { display: block; color: var(--suave); }
 .firmas .firma-img { display: block; height: 54px; max-width: 90%; object-fit: contain; margin: -62px auto 8px; }
-.firmas:has(.firma-img) { row-gap: 76px; margin-top: 76px; }
+.firmas:has(.firma-img) { row-gap: calc(var(--fh, 54px) + 22px); margin-top: calc(var(--fh, 54px) + 22px); }
 .fm-lista { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .fm-item { border: 1px solid var(--linea); border-radius: var(--radio); padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--hoja); }
 .fm-item h3 { font: 700 14px/1.3 var(--f-doc); color: var(--acento); margin: 0; }
@@ -4516,12 +4516,24 @@ const VerifDian = (() => {
   S.firmas = FIRMAS;
   const claveFirma = (n) => String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   const firmaDe = (n) => (n ? FIRMAS.img.get(claveFirma(n)) || null : null);
-  const firmaImgHTML = (n) => { const f = firmaDe(n); return f ? `<img class="firma-img" src="${f.img}" alt="Firma de ${esc(n)}">` : ""; };
-  /** Dibuja la firma sobre la línea (yLinea), centrada en x, dentro de una caja de ancho × alto mm. */
-  function pdfFirmaImg(doc, nombre, x, yLinea, ancho = 46, alto = 15) {
-    const f = firmaDe(nombre); if (!f) return;
-    const r = Math.min(ancho / f.w, alto / f.h), w = f.w * r, h = f.h * r;
-    try { doc.addImage(f.img, "PNG", x - w / 2, yLinea - h - 0.6, w, h); } catch (err) { console.error(err); }
+  /** Tamaño de la firma en los informes: el elegido en Datos → Firmas o, en automático, más grande si la firma es alta y angosta. */
+  const escalaFirma = (f) => (Number(f?.escala) > 0 ? Number(f.escala) : f && f.h > f.w * 1.1 ? 1.6 : 1);
+  const altoFirmaPx = (n) => { const f = firmaDe(n); return f ? Math.round(Math.min(100, 54 * escalaFirma(f))) : 0; };
+  const fhVar = (nombres) => `--fh:${Math.max(54, ...nombres.map(altoFirmaPx))}px`;
+  const firmaImgHTML = (n) => { const f = firmaDe(n); if (!f) return ""; const h = altoFirmaPx(n); return `<img class="firma-img" src="${f.img}" alt="Firma de ${esc(n)}" style="height:${h}px;margin-top:-${h + 8}px">`; };
+  /** Medidas (mm) de la firma en el PDF: caja base de 46 × 15 mm por la escala, con tope. */
+  function dimFirmaPDF(nombre) {
+    const f = firmaDe(nombre); if (!f) return null;
+    const e = escalaFirma(f), ancho = Math.min(72, 46 * e), alto = Math.min(27, 15 * e);
+    const r = Math.min(ancho / f.w, alto / f.h);
+    return { f, w: f.w * r, h: f.h * r };
+  }
+  /** Espacio extra (mm) que necesitan sobre la línea las firmas más altas que la caja normal. */
+  const extraFirmaPDF = (nombres) => Math.max(0, ...nombres.map((n) => (dimFirmaPDF(n)?.h || 0) - 15));
+  /** Dibuja la firma sobre la línea (yLinea), centrada en x. */
+  function pdfFirmaImg(doc, nombre, x, yLinea) {
+    const d = dimFirmaPDF(nombre); if (!d) return;
+    try { doc.addImage(d.f.img, "PNG", x - d.w / 2, yLinea - d.h - 0.6, d.w, d.h); } catch (err) { console.error(err); }
   }
   /** Quita el fondo claro de la foto o escaneo, recorta al trazo y la reduce: queda un PNG transparente liviano. */
   async function procesarFirma(file) {
@@ -4584,7 +4596,8 @@ const VerifDian = (() => {
         <div class="fm-prev">${f ? `<img src="${f.img}" alt="Firma de ${esc(p.nombre)}">` : "<span>Sin firma cargada</span>"}</div>
         <small>Sale en: ${esc([...p.donde].join(" · "))}</small>
         <div class="fila"><label class="btn ${f ? "" : "primario"} chico" style="cursor:pointer">${f ? "Cambiar firma" : "Cargar firma"}<input type="file" accept="image/png,image/jpeg,image/webp" data-firma="${esc(p.clave)}" data-nombre="${esc(p.nombre)}" hidden></label>
-        ${f ? `<button class="btn chico" data-firmaquitar="${esc(p.clave)}">Quitar</button>` : ""}</div></div>`;
+        ${f ? `<button class="btn chico" data-firmaquitar="${esc(p.clave)}">Quitar</button>
+          <label class="pie" style="margin:0 0 0 auto;display:flex;align-items:center;gap:6px">Tamaño <select data-firmaescala="${esc(p.clave)}" aria-label="Tamaño de la firma de ${esc(p.nombre)} en los informes">${[["", `Automático${escalaFirma({ ...f, escala: 0 }) > 1 ? " (grande)" : ""}`], ["1", "Normal"], ["1.3", "Grande"], ["1.6", "Más grande"], ["1.8", "Muy grande"]].map(([v, t]) => `<option value="${v}" ${String(f.escala || "") === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>` : ""}</div></div>`;
     }
     return html + `</div>`;
   }
@@ -4601,13 +4614,20 @@ const VerifDian = (() => {
     } catch (err) { console.error(err); FIRMAS.error = err.message || String(err); }
     FIRMAS.ocupado = ""; render();
   });
+  document.addEventListener("change", async (ev) => {
+    const el = ev.target; if (!el.dataset || el.dataset.firmaescala === undefined) return;
+    const clave = el.dataset.firmaescala, f = FIRMAS.img.get(clave); if (!f) return;
+    const doc = { ...f, escala: el.value === "" ? 0 : Number(el.value), actualizado: new Date().toISOString() };
+    FIRMAS.img.set(clave, doc); render();
+    try { if (S.db) await S.db.doc("firmas/" + clave).set(doc); toast("Tamaño de la firma guardado."); } catch (err) { toast(`No se pudo guardar: ${err.message || err.code}`); }
+  });
   document.addEventListener("click", async (ev) => {
     const b = ev.target.closest?.("[data-firmaquitar]"); if (!b) return;
     const clave = b.dataset.firmaquitar;
     try { if (S.db) await S.db.doc("firmas/" + clave).delete(); FIRMAS.img.delete(clave); toast("Firma quitada."); } catch (err) { toast(`No se pudo quitar: ${err.message || err.code}`); }
     render();
   });
-  const firmasHTML = () => `<div class="firmas">${firmantes().map((f) => `<div>${firmaImgHTML(f.nombre)}<b>${esc(f.nombre)}</b><span>${esc(f.cargo)}</span>${f.tp ? `<span>${esc(f.tp)}</span>` : ""}</div>`).join("")}</div>`;
+  const firmasHTML = () => `<div class="firmas" style="${fhVar(firmantes().map((f) => f.nombre))}">${firmantes().map((f) => `<div>${firmaImgHTML(f.nombre)}<b>${esc(f.nombre)}</b><span>${esc(f.cargo)}</span>${f.tp ? `<span>${esc(f.tp)}</span>` : ""}</div>`).join("")}</div>`;
   function modeloHTML(m, extraClase = "") {
     if (m.error) return `<section class="hoja">${encabezadoHTML(m)}<div class="aviso advertencia"><p>${esc(m.error)}</p></div></section>`;
     const head = `<tr>${m.cols.map((c) => `<th>${esc(c.t)}</th>`).join("")}</tr>`;
@@ -5215,7 +5235,7 @@ const VerifDian = (() => {
     // Otras revelaciones (notas 7 y 8) van en la misma hoja que las firmas.
     doc.setFont("helvetica", "normal"); doc.setFontSize(8.2);
     const lineas78 = doc.splitTextToSize(limpiarPDF(rellenar(S.cfg.hechosPosteriores, ctx)), AN).length + doc.splitTextToSize(limpiarPDF(rellenar(S.cfg.aprobacion, ctx)), AN).length;
-    espacio(34 + lineas78 * 3.7 + ALTO_FIRMAS);
+    espacio(34 + lineas78 * 3.7 + altoFirmas());
     titulo("OTRAS REVELACIONES");
     titulo("NOTA 7. HECHOS OCURRIDOS DESPUÉS DEL PERÍODO SOBRE EL QUE SE INFORMA", true); parrafo(rellenar(S.cfg.hechosPosteriores, ctx));
     titulo("NOTA 8. APROBACIÓN DE LOS ESTADOS FINANCIEROS", true); parrafo(rellenar(S.cfg.aprobacion, ctx));
@@ -5310,7 +5330,7 @@ const VerifDian = (() => {
         <div class="encab"><img class="logo" src="${$("#t-logo").src}" alt="Districlínicas"><span class="estado">Informe del Revisor Fiscal</span><span class="meta">Dictamen sobre los estados financieros al ${esc(fechaLarga(finDeMes(p)))}</span></div>
         <p>A los señores accionistas de<br><b>${esc(S.cfg.empresa.razon)}</b></p>
         ${dictamenSecciones(D).map((sx) => `<h3>${esc(sx.titulo)}</h3>${sx.parrafos.map((t) => `<p${t.startsWith("•") ? ' style="padding-left:14px"' : ""}>${esc(t)}</p>`).join("")}`).join("")}
-        <div class="firmas" style="grid-template-columns:minmax(220px,320px);justify-content:center"><div>${ok ? firmaImgHTML(rf?.nombre) : ""}<b>${esc(rf?.nombre || "")}</b><span>Revisor Fiscal</span>${rf?.tp ? `<span>${esc(rf.tp)}</span>` : ""}${d.designadoPor ? `<span>Designado por ${esc(d.designadoPor)}</span>` : ""}<span>${esc(lugarFecha)}</span></div></div>
+        <div class="firmas" style="grid-template-columns:minmax(220px,320px);justify-content:center;${ok ? fhVar([rf?.nombre]) : ""}"><div>${ok ? firmaImgHTML(rf?.nombre) : ""}<b>${esc(rf?.nombre || "")}</b><span>Revisor Fiscal</span>${rf?.tp ? `<span>${esc(rf.tp)}</span>` : ""}${d.designadoPor ? `<span>Designado por ${esc(d.designadoPor)}</span>` : ""}<span>${esc(lugarFecha)}</span></div></div>
       </section>`;
   }
   function pdfDictamen(doc, D) {
@@ -5340,8 +5360,9 @@ const VerifDian = (() => {
       sx.parrafos.forEach((t) => parrafo(t));
     }
     const { rf, lugarFecha } = cierreDictamen(p);
-    espacio(42);
-    y += 22;
+    const extD = ok ? extraFirmaPDF([rf?.nombre]) : 0;
+    espacio(42 + extD);
+    y += 22 + extD;
     if (ok) pdfFirmaImg(doc, rf?.nombre, W / 2, y);
     doc.setDrawColor(40); doc.setLineWidth(0.25); doc.line(W / 2 - 35, y, W / 2 + 35, y);
     doc.setFont("helvetica", "bold"); doc.setFontSize(8.4); doc.text(limpiarPDF(rf?.nombre || ""), W / 2, y + 4, { align: "center" });
@@ -6581,11 +6602,12 @@ const VerifDian = (() => {
     doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.text(limpiarPDF(m.periodoTexto), W / 2, (y += 4.5), { align: "center" });
     return y + 5;
   }
-  const ALTO_FIRMAS = 60; // mm que ocupa el bloque de tres firmas
+  const ALTO_FIRMAS = 60; // mm que ocupa el bloque de tres firmas con firmas de tamaño normal
+  const altoFirmas = () => ALTO_FIRMAS + 2 * extraFirmaPDF(firmantes().map((x) => x.nombre));
   function pdfFirmas(doc, y) {
     const W = doc.internal.pageSize.getWidth();
-    y += 16;
-    const f = firmantes();
+    const f = firmantes(), ext = extraFirmaPDF(f.map((x) => x.nombre));
+    y += 16 + ext;
     const bloque = (x, p) => {
       pdfFirmaImg(doc, p.nombre, x, y);
       doc.setDrawColor(40); doc.setLineWidth(0.25); doc.line(x - 32, y, x + 32, y);
@@ -6600,7 +6622,7 @@ const VerifDian = (() => {
     }
     if (f[0]) bloque(W * 0.28, f[0]);
     if (f[1]) bloque(W * 0.72, f[1]);
-    if (f[2]) { y += 30; bloque(W / 2, f[2]); }
+    if (f[2]) { y += 30 + ext; bloque(W / 2, f[2]); }
   }
   /**
    * Dibuja un estado. Las firmas nunca quedan solas en una hoja: si no caben debajo
@@ -6674,7 +6696,7 @@ const VerifDian = (() => {
       doc.deletePage(inicio);
       doc.setPage(doc.getNumberOfPages());
     };
-    const necesario = altoPie() + (m.firmas ? ALTO_FIRMAS : 0);
+    const necesario = altoPie() + (m.firmas ? altoFirmas() : 0);
     const cabe = (y) => y + necesario <= H - 14;
     let nivel = 0;
     let y = dibujar(null, nivel);
@@ -7388,7 +7410,7 @@ const VerifDian = (() => {
       ${Math.abs(s.diferencia) >= 1 ? `<div class="aviso advertencia" style="margin-top:12px"><p>La diferencia viene de los saldos iniciales: el libro empezó el mes con ${fmtC(s.inicialLibros)} y el banco con ${fmtC(s.inicialBanco)}. ${z.previo ? "Revise las partidas arrastradas del mes anterior." : "No hay conciliación del mes anterior guardada; cárguela o marque en <b>Pendientes</b> los movimientos del banco que corresponden al mes anterior."}</p></div>` : ""}
       <h3 class="bc-h3">Efecto del comprobante sugerido</h3>
       <p class="pie" style="margin-top:0">Al registrar el comprobante de la pestaña <b>Por registrar</b>, el saldo en libros pasa de ${fmtC(s.libros)} a <b>${fmtC(s.libros + CB.efectoBanco)}</b>; quedan como partidas conciliatorias solo las consignaciones en tránsito, los egresos pendientes y los abonos o cargos que deba identificar.</p>
-      <div class="firmas"><div>${firmaImgHTML(firmantes()[1]?.nombre)}<b>${esc(firmantes()[1]?.nombre || "")}</b><span>Elaboró · ${esc(firmantes()[1]?.cargo || "Contador")}</span></div><div><b>&nbsp;</b><span>Revisó</span></div></div>
+      <div class="firmas" style="${fhVar([firmantes()[1]?.nombre])}"><div>${firmaImgHTML(firmantes()[1]?.nombre)}<b>${esc(firmantes()[1]?.nombre || "")}</b><span>Elaboró · ${esc(firmantes()[1]?.cargo || "Contador")}</span></div><div><b>&nbsp;</b><span>Revisó</span></div></div>
       </section>`;
     return html;
   }
@@ -7586,7 +7608,7 @@ const VerifDian = (() => {
             tabla(["Cuenta", "Nombre", "Detalle", "Débito", "Crédito"], [...CB.lineas.map((l) => [l.cuenta, limpiarPDF(l.nombreCuenta).slice(0, 34), limpiarPDF(l.detalle).slice(0, 60), l.debito ? fmtC(l.debito) : "", l.credito ? fmtC(l.credito) : ""]), ["", "", "Sumas iguales", fmtC(CB.debitos), fmtC(CB.creditos)]], { columnStyles: { 3: { halign: "right" }, 4: { halign: "right" } } }); }
           if (y > 230) { doc.addPage(); y = 30; }
           const f = firmantes(), W = doc.internal.pageSize.getWidth();
-          y += 20; pdfFirmaImg(doc, f[1]?.nombre, 60, y); doc.setDrawColor(40); doc.line(30, y, 90, y); doc.line(W - 90, y, W - 30, y);
+          y += 20 + extraFirmaPDF([f[1]?.nombre]); pdfFirmaImg(doc, f[1]?.nombre, 60, y); doc.setDrawColor(40); doc.line(30, y, 90, y); doc.line(W - 90, y, W - 30, y);
           doc.setFontSize(8); doc.setFont("helvetica", "bold"); doc.text(limpiarPDF(f[1]?.nombre || ""), 60, y + 4, { align: "center" }); doc.setFont("helvetica", "normal"); doc.text("Elaboró", 60, y + 8, { align: "center" }); doc.text("Revisó", W - 60, y + 8, { align: "center" });
           data = doc.output("blob"); nombre = base + ".pdf";
         } else {
@@ -8038,8 +8060,8 @@ const VerifDian = (() => {
           { columnStyles: { ...der([2, 3, 4]), 5: { cellWidth: 32 } }, styles: { fontSize: 7.4, minCellHeight: 6, cellPadding: 1.3, lineColor: [200, 208, 220] },
             didParseCell: (h) => { if (h.section === "body" && h.row.index === provsPDF.length) { h.cell.styles.fontStyle = "bold"; h.cell.styles.fillColor = FONDO; } } });
         if (y > H - 40) { doc.addPage(); y = 40; }
-        y += 18;
         const fz = PV.firmas || FIRMAS_PV;
+        y += 18 + extraFirmaPDF([fz.elabora.nombre, fz.aprueba.nombre]);
         pdfFirmaImg(doc, fz.elabora.nombre, 57, y); pdfFirmaImg(doc, fz.aprueba.nombre, W - 57, y);
         doc.setDrawColor(40); doc.setLineWidth(0.25); doc.line(22, y, 92, y); doc.line(W - 92, y, W - 22, y);
         doc.setFontSize(8); doc.setFont("helvetica", "bold"); doc.setTextColor(20);
@@ -10716,7 +10738,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       let y = doc.lastAutoTable.finalY + 4;
       doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
       doc.text(limpiarPDF(`Saldos tomados de los libros de contabilidad de ${S.cfg.empresa.razon} a 31 de diciembre de ${X.y}. Débitos ${fmt(sum.d)} = créditos ${fmt(sum.c)}.`), 10, y);
-      if (y + ALTO_FIRMAS > doc.internal.pageSize.getHeight() - 10) { doc.addPage("letter", "landscape"); y = 20; }
+      if (y + altoFirmas() > doc.internal.pageSize.getHeight() - 10) { doc.addPage("letter", "landscape"); y = 20; }
       pdfFirmas(doc, y);
       const n = doc.getNumberOfPages();
       for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7); doc.setTextColor(110); doc.text(`Folio ${i} de ${n}`, W - 10, doc.internal.pageSize.getHeight() - 6, { align: "right" }); doc.text(limpiarPDF(`${S.cfg.empresa.razon} · NIT ${S.cfg.empresa.nit} · Libro mayor y balances ${X.y}`), 10, doc.internal.pageSize.getHeight() - 6); doc.setTextColor(20); }
