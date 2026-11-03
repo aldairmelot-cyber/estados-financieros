@@ -10540,10 +10540,18 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         if (it.tipo === "costos" && hs.length) { for (const h of hs) add(nombreRenglonRQ(q, it, h.resumen.renglon), libroRQ(q, [h], false)); hechos.push(it.n); }
         else if (hs.length) { add(nom("xlsx"), libroRQ(q, hs, false)); hechos.push(it.n); }
         if (it.tipo === "costos" || it.tipo === "retenciones" || it.tipo === "pasivos") for (const h of hs) if (h.resumen?.dif != null && Math.abs(h.resumen.dif) >= 1000) faltan.push(`${it.n}. ${h.nombre}: explicar la diferencia de $ ${fmt(h.resumen.dif)} frente al renglón ${h.resumen.renglon || ""} declarado (conciliación fiscal, formato 2516).`);
-        if (it.tipo === "retenciones") faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista.`);
-        if (it.tipo === "certificados") faltan.push(`${it.n}. Pedir y adjuntar el certificado tributario anual de cada entidad de ${nom("xlsx")}.`);
+        if ((it.tipo === "retenciones" || it.tipo === "certificados") && (it.adjuntos || []).length) { /* los soportes se agregan abajo */ }
+        else if (it.tipo === "retenciones") faltan.push(`${it.n}. Adjuntar los certificados de retención de cada agente retenedor de la lista.`);
+        else if (it.tipo === "certificados") faltan.push(`${it.n}. Pedir y adjuntar el certificado tributario anual de cada entidad de ${nom("xlsx")}.`);
         if (it.tipo === "cambio") faltan.push(`${it.n}. Hay movimiento en cuentas de diferencia en cambio: completar el cuadro con facturas, TRM y pagos, y adjuntar los soportes.`);
         if (it.tipo === "otro") faltan.push(`${it.n}. ${textoItem(it, q)}`);
+      }
+      // Soportes cargados en cada numeral (certificados de retención, certificados bancarios…): una carpeta por numeral.
+      for (const it of q.items) {
+        if (it.estado === "noaplica" || !(it.adjuntos || []).length) continue;
+        let ok = 0;
+        for (const a of it.adjuntos) { try { RQ.ocupado = `Agregando ${a.nombre}…`; const e = $("#rq-ocupado"); if (e) e.textContent = RQ.ocupado; add(`${carpetaAdjRQ(q, it)}/${a.nombre}`, await bytesAdjRQ(a)); ok++; } catch (err) { faltan.push(`${it.n}. ${a.nombre}: ${err.message}`); } }
+        if (ok && !hechos.includes(it.n)) hechos.push(it.n);
       }
       add(`00_Indice_anexos_AG${q.anio}.xlsx`, libroRQ(q, A.hojas, true, true));
       const html = await cartaRQ(q, A, true);
@@ -10839,8 +10847,64 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       await guardarArchivo(q.pdfNombre || `Requerimiento_${q.numero}.pdf`, u);
     } catch (err) { toast(`No se pudo descargar: ${err.message}`); }
   }
+  /* ---------- soportes adjuntos por numeral (certificados de retención, certificados bancarios, etc.)
+     Se guardan en requerimientosAdj (datos del archivo) y requerimientosAdjPartes (el archivo en trozos de menos de 1 MB). */
+  const TAM_ADJ = 900000, MAX_ADJ = 15 * 1024 * 1024;
+  const nombreSeguro = (n) => String(n || "archivo").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, "_").slice(0, 90);
+  const carpetaAdjRQ = (q, it) => `N${String(it.n).padStart(2, "0")}_${it.tipo === "retenciones" ? "Certificados_de_retencion" : it.tipo === "certificados" ? "Certificados_tributarios_entidades_financieras" : "Soportes"}_AG${q.anio}`;
+  async function subirAdjRQ(q, n, files) {
+    const it = q.items.find((x) => x.n === n); if (!it) return;
+    RQ.error = ""; const errores = [];
+    it.adjuntos = it.adjuntos || [];
+    for (const file of files) {
+      try {
+        if (file.size > MAX_ADJ) throw new Error("pesa más de 15 MB");
+        RQ.ocupado = `Guardando ${file.name}…`; render();
+        const buf = new Uint8Array(await file.arrayBuffer());
+        let bin = ""; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        const b64 = btoa(bin), partes = Math.max(1, Math.ceil(b64.length / TAM_ADJ));
+        const id = `${q.numero}_${n}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        let nombre = nombreSeguro(file.name), k = 2;
+        while (it.adjuntos.some((a) => a.nombre === nombre)) nombre = nombreSeguro(file.name).replace(/(\.[^.]+)?$/, `_${k++}$1`);
+        if (S.db) {
+          for (let i = 0; i < partes; i++) await S.db.doc(`requerimientosAdjPartes/${id}_${i}`).set({ id, i, d: b64.slice(i * TAM_ADJ, (i + 1) * TAM_ADJ) });
+          await S.db.doc(`requerimientosAdj/${id}`).set({ id, numero: q.numero, n, nombre, tam: file.size, partes, cargado: new Date().toISOString() });
+        }
+        (RQ.adjCache ||= new Map()).set(id, buf);
+        it.adjuntos.push({ id, nombre, tam: file.size, partes });
+      } catch (err) { console.error(err); errores.push(`${file.name}: ${err.message || err}`); }
+    }
+    RQ.ocupado = "";
+    if (errores.length) RQ.error = `No se pudieron guardar: ${errores.join(" · ")}`;
+    await guardarRQ(q);
+    toast(`${files.length - errores.length} archivo(s) adjunto(s) al numeral ${n}.`);
+    render();
+  }
+  async function bytesAdjRQ(a) {
+    if (RQ.adjCache?.has(a.id)) return RQ.adjCache.get(a.id);
+    if (!S.db) throw new Error(`${a.nombre} no está disponible en esta vista.`);
+    let b64 = "";
+    for (let i = 0; i < (a.partes || 1); i++) { const sn = await S.db.doc(`requerimientosAdjPartes/${a.id}_${i}`).get(); if (!sn.exists) throw new Error(`falta una parte de ${a.nombre}; cárguelo de nuevo.`); b64 += sn.data().d; }
+    const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    (RQ.adjCache ||= new Map()).set(a.id, u);
+    return u;
+  }
+  async function borrarAdjRQ(q, n, id) {
+    const it = q.items.find((x) => x.n === n); if (!it) return;
+    const a = (it.adjuntos || []).find((x) => x.id === id); if (!a) return;
+    try {
+      if (S.db) { for (let i = 0; i < (a.partes || 1); i++) await S.db.doc(`requerimientosAdjPartes/${id}_${i}`).delete(); await S.db.doc(`requerimientosAdj/${id}`).delete(); }
+      it.adjuntos = it.adjuntos.filter((x) => x.id !== id); RQ.adjCache?.delete(id);
+      await guardarRQ(q); toast(`${a.nombre} quitado.`);
+    } catch (err) { toast(`No se pudo quitar: ${err.message || err.code}`); }
+    render();
+  }
+  async function bajarAdjRQ(q, n, id) {
+    const a = (q.items.find((x) => x.n === n)?.adjuntos || []).find((x) => x.id === id); if (!a) return;
+    try { await guardarArchivo(a.nombre, await bytesAdjRQ(a)); } catch (err) { toast(`No se pudo descargar: ${err.message}`); }
+  }
   async function borrarRQ(numero) {
-    try { if (S.db) { await S.db.doc(`requerimientos/${numero}`).delete(); try { await S.db.doc(`requerimientosPdf/${numero}`).delete(); } catch { /* */ } } RQ.docs.delete(numero); RQ.sel = null; RQ.confirmar = null; toast("Requerimiento eliminado."); }
+    try { if (S.db) { const q0 = RQ.docs.get(numero); for (const it of q0?.items || []) for (const a of it.adjuntos || []) { try { for (let i = 0; i < (a.partes || 1); i++) await S.db.doc(`requerimientosAdjPartes/${a.id}_${i}`).delete(); await S.db.doc(`requerimientosAdj/${a.id}`).delete(); } catch { /* */ } } await S.db.doc(`requerimientos/${numero}`).delete(); try { await S.db.doc(`requerimientosPdf/${numero}`).delete(); } catch { /* */ } } RQ.docs.delete(numero); RQ.sel = null; RQ.confirmar = null; toast("Requerimiento eliminado."); }
     catch (err) { toast(`No se pudo eliminar: ${err.message || err.code}`); }
     render();
   }
@@ -10908,6 +10972,13 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     catch (err) { console.error(err); RQ.error = `No se pudo revisar: ${err.message}`; }
     RQ.ocupado = ""; render();
   }
+  function adjuntosRQ(q, it) {
+    const as = it.adjuntos || [];
+    const texto = it.tipo === "retenciones" ? "Cargar certificados de retención" : it.tipo === "certificados" ? "Cargar certificados de los bancos" : "Adjuntar soportes";
+    return `<div class="rq-adj" style="margin-top:6px;text-align:left">
+      ${as.length ? `<small style="display:block">${as.length} archivo(s) para el ZIP:</small>${as.map((a) => `<div style="display:flex;gap:4px;align-items:center;font-size:12px"><a href="#" data-rqadjbajar="${esc(a.id)}" data-n="${it.n}" title="Descargar" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${esc(a.nombre)}</a><button class="btn chico" style="padding:0 6px" data-rqadjquitar="${esc(a.id)}" data-n="${it.n}" aria-label="Quitar ${esc(a.nombre)}">×</button></div>`).join("")}` : ""}
+      <label class="btn chico" style="cursor:pointer;margin-top:4px">${texto}<input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.xls,.xlsx,.doc,.docx" data-rqadj="${it.n}" hidden></label></div>`;
+  }
   function detalleRQ(q) {
     const y = q.anio, tieneAn = AN.docs.has(y), tieneLibro = unidadesCQ(y).length > 0, decl = rentaVigente(y);
     const falta = (ok, t, link) => `<li>${ok ? '<span class="chip ok">Cargado</span>' : '<span class="chip advertencia">Falta</span>'} ${t}${ok ? "" : ` — <a href="#" data-nav="${link}">cargar</a>`}</li>`;
@@ -10934,7 +11005,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
           <textarea data-rqi="${i}" data-k="notas" rows="1" placeholder="Notas" style="width:100%;margin-top:4px" aria-label="Notas">${esc(it.notas || "")}</textarea></td>
         <td><select data-rqi="${i}" data-k="estado" aria-label="Estado">${ESTADOS_RQ.map(([v, t]) => `<option value="${v}" ${it.estado === v ? "selected" : ""}>${t}</option>`).join("")}</select>
           <input type="text" data-rqi="${i}" data-k="resp" value="${esc(it.resp || "")}" placeholder="Responsable" style="width:130px;margin-top:4px;display:block" aria-label="Responsable"></td>
-        <td class="num">${it.tipo === "costos" ? renglonesRQ(it).map((r) => `<button class="btn primario chico" style="margin:0 0 4px" data-rq="archivo-r" data-id="${esc(q.numero)}" data-n="${it.n}" data-r="${r}" title="${esc(nombreRenglonRQ(q, it, r))}">Renglón ${r} · ${esc(R110[r].split(" ").slice(0, 3).join(" "))}</button>`).join("<br>") + `<small>Un Excel por renglón, como lo pide la DIAN</small>` : fmtN ? `<button class="btn primario chico" data-rq="archivo-n" data-id="${esc(q.numero)}" data-n="${it.n}">Descargar ${it.tipo === "eeff" || it.tipo === "mayor" ? "PDF" : it.tipo === "cambio" ? "" : "Excel"}</button><small>${esc(arch)}</small>` : `<small>Documento que adjunta usted</small>`}</td></tr>`; }).join("")}
+        <td class="num">${it.tipo === "costos" ? renglonesRQ(it).map((r) => `<button class="btn primario chico" style="margin:0 0 4px" data-rq="archivo-r" data-id="${esc(q.numero)}" data-n="${it.n}" data-r="${r}" title="${esc(nombreRenglonRQ(q, it, r))}">Renglón ${r} · ${esc(R110[r].split(" ").slice(0, 3).join(" "))}</button>`).join("<br>") + `<small>Un Excel por renglón, como lo pide la DIAN</small>` : fmtN ? `<button class="btn primario chico" data-rq="archivo-n" data-id="${esc(q.numero)}" data-n="${it.n}">Descargar ${it.tipo === "eeff" || it.tipo === "mayor" ? "PDF" : it.tipo === "cambio" ? "" : "Excel"}</button><small>${esc(arch)}</small>` : `<small>Documento que adjunta usted</small>`}${adjuntosRQ(q, it)}</td></tr>`; }).join("")}
       </tbody></table></div>
       <div class="fila" style="margin-top:12px;justify-content:space-between"><span class="pie" style="margin:0">Los anexos se arman con la contabilidad y se cuadran contra el renglón declarado; las diferencias quedan señaladas en cada hoja para explicarlas antes de enviar.</span>
         ${RQ.confirmar === q.numero ? `<span><button class="btn chico peligro" data-rq="borrar" data-id="${esc(q.numero)}">Eliminar</button> <button class="btn chico" data-rq="cancelar">No</button></span>` : `<button class="btn chico" data-rq="pedir-borrar" data-id="${esc(q.numero)}">Eliminar requerimiento</button>`}</div></section>`;
@@ -10986,6 +11057,18 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     toast(`El requerimiento ${q.numero} quedó con ${nuevos.length} numerales.`);
     render();
   }
+  document.addEventListener("change", (ev) => {
+    const el = ev.target; if (!el.dataset || el.dataset.rqadj === undefined || !el.files?.length) return;
+    const q = RQ.docs.get(RQ.sel), files = [...el.files]; el.value = "";
+    if (q) subirAdjRQ(q, Number(el.dataset.rqadj), files);
+  });
+  document.addEventListener("click", (ev) => {
+    const b = ev.target.closest?.("[data-rqadjquitar],[data-rqadjbajar]"); if (!b) return;
+    ev.preventDefault();
+    const q = RQ.docs.get(RQ.sel); if (!q) return;
+    if (b.dataset.rqadjquitar) borrarAdjRQ(q, Number(b.dataset.n), b.dataset.rqadjquitar);
+    else bajarAdjRQ(q, Number(b.dataset.n), b.dataset.rqadjbajar);
+  });
   function cambioReq(el) {
     if (el.id === "archivo-rq-nuevo") { if (el.files.length) cargarPdfsRQ([...el.files]); el.value = ""; return true; }
     if (el.id === "archivo-rq") { const q = RQ.docs.get(RQ.sel); if (q && el.files[0]) subirPdfRQ(q, el.files[0]); el.value = ""; return true; }
