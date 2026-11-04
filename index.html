@@ -5633,7 +5633,7 @@ const VerifDian = (() => {
           <div class="campo"><label for="opc-sf" style="font-size:12px;color:var(--suave)">Saldo a favor del período anterior</label><input id="opc-sf" type="number" data-opcbim="${S.impVista === "iva" ? "saldoFavorAnterior" : "saldoFavorAnteriorIca"}" value="${opc[S.impVista === "iva" ? "saldoFavorAnterior" : "saldoFavorAnteriorIca"] ?? ""}"></div>
           <div class="campo"><label for="opc-sa" style="font-size:12px;color:var(--suave)">Sanciones</label><input id="opc-sa" type="number" data-opcbim="${S.impVista === "iva" ? "sanciones" : "sancionesIca"}" value="${opc[S.impVista === "iva" ? "sanciones" : "sancionesIca"] ?? ""}"></div>
           ${S.impVista === "ica" ? `<div class="campo"><label for="opc-met" style="font-size:12px;color:var(--suave)">Base gravable</label><select id="opc-met" data-icametodo="1"><option value="distrito" ${ci.metodo !== "ventasTotales" ? "selected" : ""}>Solo ingresos de este distrito (excluye centros de fuera y sus devoluciones)</option><option value="ventasTotales" ${ci.metodo === "ventasTotales" ? "selected" : ""}>Ventas brutas totales (como se presentó el bimestre 4)</option></select></div>` : ""}
-          <div class="fila" style="margin-left:auto"><button class="btn primario" data-exportar="pdf-${S.impVista}">PDF</button><button class="btn" data-exportar="excel-imp">Excel (retención, IVA e ICA)</button></div>
+          <div class="fila" style="margin-left:auto"><button class="btn primario" data-exportar="pdf-${S.impVista}" title="Formulario, liquidación y observaciones">PDF para revisión (formulario y anexos)</button><button class="btn" data-exportar="excel-imp">Excel (retención, IVA e ICA)</button></div>
         </div></section>`;
       if (S.impVista === "ica" && !mod.error && ci.metodo === "ventasTotales") {
         const alt = Impuestos.liquidarIca(movBimestre(p).mov, movBimestre(p).movCentro, { ...ci }, { sanciones: opc.sancionesIca, saldoFavorAnterior: opc.saldoFavorAnteriorIca });
@@ -6487,7 +6487,7 @@ const VerifDian = (() => {
     html += `<section class="panel"><div class="fila">
       <div class="campo"><label for="imp-trab" style="font-size:12px;color:var(--suave)">Base de rentas de trabajo (pagos laborales del mes)</label><input id="imp-trab" type="number" data-impbase="1" placeholder="Automática: ${esc((ci.cuentasTrabajo || []).join(", "))}" value="${manual ?? ""}"></div>
       <p class="pie" style="margin:0;max-width:520px">Si la deja vacía se suma el movimiento del mes de las cuentas ${esc((ci.cuentasTrabajo || []).join(", "))}. Las tarifas de autorretención, las cuentas base y la asignación de subcuentas a conceptos se ajustan en Configuración → Impuestos.</p>
-      <div class="fila" style="margin-left:auto"><button class="btn primario" data-exportar="pdf-imp">PDF de la liquidación</button><button class="btn" data-exportar="excel-imp">Excel</button></div></div></section>`;
+      <div class="fila" style="margin-left:auto"><button class="btn primario" data-exportar="pdf-imp" title="Formulario 350, liquidación por concepto, detalle por tercero y observaciones">PDF para revisión (formulario y anexos)</button><button class="btn" data-exportar="excel-imp">Excel</button></div></div></section>`;
     if (tieneBalance) html += avisoAjuste("ret", p, L);
     html += form350HTML(p, L);
     html += `<details class="conf" style="background:var(--hoja)"><summary>Liquidación detallada por concepto</summary><div>${modeloHTML(mI)}</div></details>`;
@@ -6720,6 +6720,65 @@ const VerifDian = (() => {
 
   /* ------------------------------------------------------------ carga de archivo */
   /** Si la librería no cargó desde cdnjs, se intenta desde otros CDN permitidos. */
+  /** Captura el formulario (350, 300 o ICA) como imagen para la primera hoja del PDF de revisión. */
+  async function imagenFormulario(tipo, periodo) {
+    await asegurarLibreria("html2canvas", ["https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js", "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"]);
+    if (!window.html2canvas) throw new Error("No se pudo cargar el generador de imagen del formulario (bloqueado por la red).");
+    let html;
+    if (tipo === "ret") html = form350HTML(periodo, modeloImpuestos(periodo).L);
+    else {
+      const mod = tipo === "iva" ? modeloIva(periodo) : modeloIca(periodo);
+      if (mod.error) return null;
+      html = tipo === "iva" ? form300HTML(periodo, { ...mod.X, parcial: mod.parcial }) : formIcaHTML(periodo, { ...mod.X, parcial: mod.parcial });
+    }
+    const cont = document.createElement("div");
+    cont.style.cssText = "position:fixed;left:-20000px;top:0;width:1000px;background:#fff";
+    cont.innerHTML = html;
+    cont.querySelectorAll(".fx-acc, .fx .v small").forEach((e) => e.remove());
+    document.body.appendChild(cont);
+    const fx = cont.querySelector(".fx");
+    Object.assign(fx.style, { margin: "0", maxWidth: "none", width: "1000px" });
+    try {
+      const c = await window.html2canvas(fx, { scale: 2, backgroundColor: "#ffffff", logging: false });
+      return { img: c.toDataURL("image/jpeg", 0.92), w: c.width, h: c.height };
+    } finally { cont.remove(); }
+  }
+  /** Observaciones para quien revisa: origen de los datos, alertas, ajustes incluidos y comparación con lo presentado. */
+  function modeloRevisionImp(tipo, periodo = S.periodo) {
+    const filas = [], [a, m] = anioMes(periodo);
+    const sec = (t) => filas.push({ tipo: "seccion", celdas: [t] });
+    const fila = (x, y) => filas.push({ tipo: "rubro", celdas: [x, y], sinNa: true });
+    let X, titulo, per, decl, totalCalc, rTotal;
+    if (tipo === "ret") {
+      const L = modeloImpuestos(periodo).L, rep = S.imp.get(periodo);
+      titulo = "Retención en la fuente (350)"; per = `${MESES[m - 1]} de ${a}`; decl = declDe("350", a, m); totalCalc = L.total; rTotal = 138;
+      sec("ORIGEN DE LOS DATOS");
+      fila("Retenciones", rep ? `Reporte cargado: ${rep.archivo || "anexo / auxiliar de retenciones"}` : "Movimiento del balance del mes (no hay reporte de retenciones cargado)");
+      fila("Autorretención y rentas de trabajo", `Balance del mes${S.cfg.impuestos.baseTrabajo?.[periodo] != null && S.cfg.impuestos.baseTrabajo[periodo] !== "" ? `; base de rentas de trabajo digitada: ${fmt(Number(S.cfg.impuestos.baseTrabajo[periodo]))}` : ""}`);
+      if (L.control) fila("Control contable", `Trasladado a la DIAN en el cierre (236590): ${fmt(L.control.contable)}. Diferencia con lo liquidado: ${fmt(L.control.diferencia)}.`);
+      if (L.alertas.length) { sec("ALERTAS DE LA LIQUIDACIÓN"); L.alertas.forEach((x) => fila(x.severidad === "error" ? "Error" : x.severidad === "advertencia" ? "Advertencia" : "Información", x.mensaje)); }
+      if (L.pendientes.length) { sec("SALDOS ANTERIORES EN CUENTAS DE RETENCIÓN"); L.pendientes.forEach((x) => fila(`${x.cuenta} ${x.nombre}`, `Saldo anterior ${fmt(-x.saldo)} · ${x.incluir ? "incluido en esta declaración" : "no incluido"}`)); }
+      X = L;
+    } else {
+      const mod = tipo === "iva" ? modeloIva(periodo) : modeloIca(periodo), bm = Impuestos.bimestre(periodo);
+      titulo = tipo === "iva" ? "IVA (300)" : `ICA ${S.cfg.impuestos.ica.municipio}`; per = `bimestre ${bm.numero} (${NOMBRE_BIM[bm.numero - 1]}) de ${bm.anio}`;
+      decl = declDe(tipo === "iva" ? "300" : "ica", bm.anio, bm.numero); rTotal = tipo === "iva" ? 88 : 34;
+      sec("ORIGEN DE LOS DATOS");
+      fila("Balances", bm.meses.map((x) => `${mesNombre(x)} ${x.slice(0, 4)}`).join(" y ") + (mod.parcial ? " (AVANCE PARCIAL: falta el segundo mes)" : ""));
+      if (mod.error) fila("Error", mod.error);
+      X = mod.X || {}; totalCalc = X.R?.[rTotal];
+      if (tipo === "iva" && X.control) fila("Control contable", `Trasladado a la ${S.cfg.impuestos.iva.cierre.join(", ")} en el cierre: ${fmt(X.control.contable)}. Diferencia: ${fmt(X.control.diferencia)}.`);
+      if (tipo === "ica") fila("Base gravable", S.cfg.impuestos.ica.metodo === "ventasTotales" ? "Ventas brutas totales" : `Solo ingresos del distrito (excluye centros ${(S.cfg.impuestos.ica.centrosFuera || []).join(", ")} y sus devoluciones)`);
+    }
+    if (X?.ajusteAplicado?.cambios?.length) {
+      sec("AJUSTE DE PERÍODOS ANTERIORES INCLUIDO EN ESTA DECLARACIÓN");
+      X.ajusteAplicado.cambios.forEach(([n, x, y]) => fila(`Renglón ${n}`, `Según libros ${fmt(x)} → con el ajuste ${fmt(y)}`));
+      fila("Nota", "Diferencias acumuladas entre los libros y las declaraciones ya presentadas del año, llevadas a este período. El detalle está en «Ajustes próxima declaración».");
+    }
+    sec("COMPARACIÓN CON LO PRESENTADO");
+    fila("Formulario presentado", decl ? `N.° ${decl.formulario || "—"}${decl.fecha ? " del " + decl.fecha : ""}: total ${fmt(decl.R?.[rTotal] || 0)} · calculado ${fmt(totalCalc || 0)} · diferencia ${fmt((totalCalc || 0) - (decl.R?.[rTotal] || 0))}` : "Aún no se ha cargado el formulario presentado de este período (borrador para revisión).");
+    return { clave: "imprev", hoja: "Observaciones", titulo: "Observaciones para la revisión", periodoTexto: `${titulo} · ${per}`, cols: [{ t: "Aspecto", tipo: "txt" }, { t: "Detalle", tipo: "txt2" }], filas, pie: ["Paquete para revisión: formulario (borrador), liquidación y anexos generados con la contabilidad."], firmas: false };
+  }
   async function asegurarLibreria(global, urls) {
     for (const url of urls) {
       if (window[global]) return;
@@ -6960,10 +7019,10 @@ const VerifDian = (() => {
       `Dada en ${e.domicilio}, a los ${f.slice(8)} días del mes de ${mesNombre(S.periodo)} de ${S.periodo.slice(0, 4)}.`,
     ];
   }
-  function construirPDF(claves, D) {
+  function construirPDF(claves, D, opts = {}) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "mm", format: "letter" });
-    const mods = { ter_cxc: () => modeloTerceros("cxc"), ter_cxp: () => modeloTerceros("cxp"), conc: () => modeloConciliacion(), comp: () => modeloCompensar(), renta: () => modeloRenta(), iva: () => modeloIva(), ica: () => modeloIca(), imp: () => modeloImpuestos(), impdet: () => (S.imp.get(S.periodo) ? modeloDetalleImp() : null), esf: () => modeloESF(D), eri: () => modeloERI(D), sede_mes: () => modeloSede(D, "mes"), sede_acum: () => modeloSede(D, "acum"), ecp: () => modeloECP(D), efe: () => modeloEFE(D), ind: () => modeloInd(D) };
+    const mods = { imprev: () => modeloRevisionImp(opts.revTipo || "ret"), ter_cxc: () => modeloTerceros("cxc"), ter_cxp: () => modeloTerceros("cxp"), conc: () => modeloConciliacion(), comp: () => modeloCompensar(), renta: () => modeloRenta(), iva: () => modeloIva(), ica: () => modeloIca(), imp: () => modeloImpuestos(), impdet: () => (S.imp.get(S.periodo) ? modeloDetalleImp() : null), esf: () => modeloESF(D), eri: () => modeloERI(D), sede_mes: () => modeloSede(D, "mes"), sede_acum: () => modeloSede(D, "acum"), ecp: () => modeloECP(D), efe: () => modeloEFE(D), ind: () => modeloInd(D) };
     let primera = true;
     const nueva = (apaisado) => { if (primera) { primera = false; if (apaisado) { doc.deletePage(1); doc.addPage("letter", "landscape"); } return; } doc.addPage("letter", apaisado ? "landscape" : "portrait"); };
     if (claves.includes("portada")) {
@@ -6983,6 +7042,13 @@ const VerifDian = (() => {
         .forEach((t, i) => doc.text(`${i + 1}.  ${t}`, 34, 183 + i * 6));
       doc.text(limpiarPDF(e.domicilio), W / 2, 250, { align: "center" });
     }
+    if (opts.formImg) {
+      // Primera hoja: el formulario tal como se ve en pantalla, ajustado a una hoja carta.
+      nueva(false);
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), f = opts.formImg;
+      const k = Math.min((W - 16) / f.w, (H - 22) / f.h), w = f.w * k, h = f.h * k;
+      doc.addImage(f.img, "JPEG", (W - w) / 2, 8, w, h);
+    }
     for (const k of claves) {
       if (!mods[k] && !k.startsWith("pyg_")) continue;
       const m = mods[k] ? mods[k]() : k === "pyg_res" ? modeloResumenSedes(D) : modeloPyG(D, k.slice(4));
@@ -6998,7 +7064,7 @@ const VerifDian = (() => {
       doc.setPage(i);
       const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
       doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(110);
-      doc.text(`${limpiarPDF(S.cfg.empresa.razon)} · Estados financieros ${S.periodo}`, 14, H - 8);
+      doc.text(`${limpiarPDF(S.cfg.empresa.razon)} · ${limpiarPDF(opts.pie || `Estados financieros ${S.periodo}`)}`, 14, H - 8);
       doc.text(`Página ${i} de ${n}`, W - 14, H - 8, { align: "right" });
       doc.setTextColor(20);
     }
@@ -7113,11 +7179,13 @@ const VerifDian = (() => {
         await asegurarLibreria("jspdf", ["https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", "https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"]);
         if (!window.jspdf) throw new Error("No se pudo cargar la librería de PDF.");
         const bm = Impuestos.bimestre(S.periodo), k = tipo.slice(4);
-        data = construirPDF([k], D); nombre = `${k === "iva" ? "IVA_300" : "ICA"}_Districlinicas_${bm.anio}-B${bm.numero}.pdf`;
+        const formImg = await imagenFormulario(k, S.periodo);
+        data = construirPDF([k, "imprev"], D, { formImg, revTipo: k, pie: `${k === "iva" ? "IVA 300" : "ICA"} · bimestre ${bm.numero} de ${bm.anio}` }); nombre = `${k === "iva" ? "IVA_300" : "ICA"}_Districlinicas_${bm.anio}-B${bm.numero}.pdf`;
       } else if (tipo === "pdf-imp") {
         await asegurarLibreria("jspdf", ["https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", "https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"]);
         if (!window.jspdf) throw new Error("No se pudo cargar la librería de PDF.");
-        data = construirPDF(["imp", "impdet"], D); nombre = `Retencion_350_Districlinicas_${S.periodo}.pdf`;
+        const formImg = await imagenFormulario("ret", S.periodo);
+        data = construirPDF(["imp", "impdet", "imprev"], D, { formImg, revTipo: "ret", pie: `Retención en la fuente 350 · ${S.periodo}` }); nombre = `Retencion_350_Districlinicas_${S.periodo}.pdf`;
       } else if (tipo === "excel") {
         await asegurarLibreria("XLSX", ["https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js", "https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"]);
         if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
