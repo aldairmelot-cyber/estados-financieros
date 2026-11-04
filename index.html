@@ -3651,12 +3651,13 @@ const VerifDian = (() => {
       return { tipo: "dian", archivo: nombre || "", docs, desde: fs[0] || "", hasta: fs[fs.length - 1] || "" };
     }
 
-    // Libro auxiliar por NIT (MantisWeb).
+    // Libro auxiliar de MantisWeb: «por Nit» (columna Numero) o «por Cta» (columna Comprobante Interno). Traen los mismos movimientos.
     h = buscar(["cuenta", "nit", "numero", "fecha", "debito", "credito"], 40);
+    if (h < 0) h = buscar(["cuenta", "nit", "comprobante interno", "fecha", "debito", "credito"], 40);
     if (h >= 0) {
-      const enc = filas[h].map(norm), col = (n) => enc.indexOf(norm(n));
-      const C = { cta: col("Cuenta"), ncta: col("nombre de Cuenta"), nit: col("Nit"), nnit: col("Nombre Nit"), num: col("Numero"), f: col("Fecha"), conc: col("Concepto"), fac: col("Factura"), obs: col("Observación"), deb: col("Debito"), cred: col("Credito") };
-      if (C.fac < 0) throw new Error("El libro auxiliar no trae la columna «Factura». Expórtelo como «Libro Auxiliar por Nit» desde MantisWeb.");
+      const enc = filas[h].map(norm), col = (...ns) => { for (const n of ns) { const i = enc.indexOf(norm(n)); if (i >= 0) return i; } return -1; };
+      const C = { cta: col("Cuenta"), ncta: col("nombre de Cuenta"), nit: col("Nit"), nnit: col("Nombre Nit"), num: col("Numero", "Comprobante Interno"), f: col("Fecha"), conc: col("Concepto", "Concepto detalle"), fac: col("Factura"), obs: col("Observación"), deb: col("Debito"), cred: col("Credito") };
+      if (C.fac < 0) throw new Error("El libro auxiliar no trae la columna «Factura». Expórtelo como «Libro Auxiliar por Nit» o «por Cuenta» desde MantisWeb.");
       let desde = "", hasta = "", nitEmp = "", empresa = "", titulo = "";
       for (let i = 0; i < h; i++) {
         const r = filas[i] || [];
@@ -3688,7 +3689,7 @@ const VerifDian = (() => {
       if (!desde || !hasta) { const fs = f.filter(Boolean).sort(); desde = desde || fs[0]; hasta = hasta || fs[fs.length - 1]; }
       return { tipo: "libro", archivo: nombre || "", titulo, nitEmp, empresa, desde, hasta, filasArchivo: n0, cta, nit, num: num_, f, conc, fac, deb, cred, nomCta, nomNit };
     }
-    throw new Error("No se reconoce el archivo. Cargue el reporte de documentos electrónicos de la DIAN (Excel) y el «Libro Auxiliar por Nit» de MantisWeb (Excel).");
+    throw new Error("No se reconoce el archivo. Cargue el reporte de documentos electrónicos de la DIAN (Excel) y el «Libro Auxiliar por Nit» o «por Cuenta» de MantisWeb (Excel).");
   }
 
   /* ---------------------------------------------------------- utilidades */
@@ -4012,7 +4013,7 @@ const VerifDian = (() => {
     if (D && L) {
       if (L.desde > D.desde || L.hasta < D.hasta) av.push(["advertencia", `El libro va del ${L.desde} al ${L.hasta} y el reporte de la DIAN del ${D.desde} al ${D.hasta}: lo que quede por fuera del libro saldrá como no registrado.`]);
       else if (L.desde.slice(0, 7) !== D.desde.slice(0, 7) || L.hasta.slice(0, 7) !== D.hasta.slice(0, 7)) av.push(["info", `El libro cubre del ${L.desde} al ${L.hasta}; el reporte de la DIAN del ${D.desde} al ${D.hasta}.`]);
-      if (L.titulo && !/nit/i.test(L.titulo)) av.push(["advertencia", `El libro dice «${L.titulo}». Se espera el «Libro Auxiliar por Nit».`]);
+      if (L.titulo && !/nit|cta|cuenta/i.test(L.titulo)) av.push(["advertencia", `El libro dice «${L.titulo}». Se espera el «Libro Auxiliar por Nit» o «por Cuenta».`]);
     }
     return av;
   }
@@ -8556,7 +8557,7 @@ const VerifDian = (() => {
       ? `<div class="dn-arch listo"><b>${t}</b><small>${esc(r.archivo)}</small><small>${r.tipo === "dian" ? `${fmt(r.docs.length)} documentos` : `${fmt(r.cta.length)} movimientos`} · del ${fechaC(r.desde)} al ${fechaC(r.hasta)}</small></div>`
       : `<div class="dn-arch"><b>${t}</b><small>Falta cargarlo</small></div>`;
     return `<div class="zona" id="zona-dn" tabindex="0" role="button" aria-label="Cargar reporte DIAN y libro auxiliar"><b>Suelte aquí el reporte de la DIAN y el libro auxiliar</b><span>Los dos en Excel (.xlsx), del mismo período. Puede soltarlos juntos o uno a la vez.</span></div>
-      <div class="dn-archivos">${fila(DN.dian, "Reporte de documentos electrónicos DIAN")}${fila(DN.libro, "Libro Auxiliar por Nit (MantisWeb)")}</div>`;
+      <div class="dn-archivos">${fila(DN.dian, "Reporte de documentos electrónicos DIAN")}${fila(DN.libro, "Libro Auxiliar por Nit o por Cuenta (MantisWeb)")}</div>`;
   }
   function cabeceraDN(X, titulo, sub) {
     const ids = idsDN();
