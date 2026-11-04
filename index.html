@@ -5839,19 +5839,30 @@ const VerifDian = (() => {
     // del distrito, menos devoluciones, menos no gravados), igual que en las declaraciones presentadas. Así cada
     // renglón se compara con su par, sin importar el método elegido en la pantalla de ICA.
     const ica = { incl: [], excl: [], det: [] }, icaCalc = [], icaDec = [];
+    // Renglón 24 en libros: retenciones de ICA que le practicaron en el bimestre (débitos de la cuenta), no el
+    // crédito del cierre, que copia lo declarado y no permite ver diferencias. Se recalcula el total a pagar.
+    const ciC = S.cfg.impuestos.ica;
+    const conRetReales = (per, mC) => {
+      const mb = movBimestre(per), bmC = Impuestos.bimestre(per);
+      const opcC = S.cfg.impuestos.opcBimestre?.[`${bmC.anio}-${bmC.numero}`] || {};
+      const R = { ...mC.X.R, 24: Impuestos.redondear((ciC.retenciones || []).reduce((s, p) => s + mb.mov.d(p), 0)) };
+      return { ...R, ...recalcIca(R, ciC, { sanciones: opcC.sancionesIca, saldoFavorAnterior: opcC.saldoFavorAnteriorIca }) };
+    };
     let ultC = 0;
     for (let b = 1; b <= 6; b++) {
       const d = S.decl.get(`ica-${anio}-${String(b).padStart(2, "0")}`);
       if (!d) continue;
       ultC = b;
-      const mC = modeloIca(`${anio}-${String(2 * b).padStart(2, "0")}`, { metodo: "distrito" });
+      const perC = `${anio}-${String(2 * b).padStart(2, "0")}`;
+      const mC = modeloIca(perC, { metodo: "distrito" });
       if (mC.error) { ica.excl.push(b); continue; }
       const dec = Object.fromEntries(Object.entries(d.R).map(([k, v]) => [k, v || 0]));
-      ica.incl.push(b); icaCalc.push(mC.X.R); icaDec.push(dec); ica.det.push({ p: b, calc: mC.X.R, dec });
+      const cal = conRetReales(perC, mC);
+      ica.incl.push(b); icaCalc.push(cal); icaDec.push(dec); ica.det.push({ p: b, calc: cal, dec });
     }
     ica.sig = ultC && ultC < 6 ? ultC + 1 : null;
     const cSig = ica.sig ? modeloIca(`${anio}-${String(2 * ica.sig).padStart(2, "0")}`, { metodo: "distrito" }) : null;
-    ica.sigCalc = cSig && !cSig.error && !cSig.parcial ? cSig.X.R : null;
+    ica.sigCalc = cSig && !cSig.error && !cSig.parcial ? conRetReales(`${anio}-${String(2 * ica.sig).padStart(2, "0")}`, cSig) : null;
     const RC = [8, 9, 10, 11, 14, 16, 18, 22, 24, 34];
     const ajC = Object.fromEntries(RC.map((n) => [n, sumar(icaCalc, n) - sumar(icaDec, n)]));
     let sugC = null;
@@ -6005,7 +6016,7 @@ const VerifDian = (() => {
         [14, "Ingresos no gravados", "restó", "Otros ingresos (" + esc((ci.otrosIngresos || []).join(", ")) + ") que no se gravan."],
         [16, "Base gravable", "declaró", "8 − 9 − 11 − 14. Es la que define el impuesto.", true],
         [22, "Impuesto a cargo", "declaró", "ICA + avisos y tableros + sobretasa bomberil.", true],
-        [24, "Retenciones de ICA que le practicaron", "restó", "Cuenta " + esc((ci.retenciones || []).join(", ")) + "."],
+        [24, "Retenciones de ICA que le practicaron", "restó", "Débitos de la cuenta " + esc((ci.retenciones || []).join(", ")) + " en el bimestre: las que le hicieron los clientes, no el cierre contable."],
         [34, "Total pagado", "pagó", "Impuesto a cargo menos retenciones de ICA.", true]],
       CLAVE: [[16, "Base gravable (renglón 16)", "Declaró"], [22, "Impuesto a cargo (renglón 22)", "Declaró"], [24, "Retenciones de ICA (renglón 24)", "Restó"]],
       SUG: [[8, "Ingresos brutos (todo el país)"], [9, `Menos ingresos fuera de ${ci.municipio}`], [11, "Menos devoluciones, rebajas y descuentos"], [14, "Menos ingresos no gravados"], [16, "Base gravable", true], [18, "Impuesto de industria y comercio"], [22, "Total impuesto a cargo", true], [24, "Menos retenciones de ICA"], [34, "Total a pagar", true]],
