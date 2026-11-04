@@ -4232,7 +4232,7 @@ const VerifDian = (() => {
     { g: "Gestión", ico: "gestion", items: [["sede:lineal", "Resultados por sede mes a mes"], ["sede:mes", "Resultados por sede · mes"], ["sede:acum", "Resultados por sede · año"]] },
     { g: "Impuestos", ico: "impuestos", items: [["impuestos:ret", "Retención en la fuente (350)"], ["impuestos:iva", "IVA (300)"], ["impuestos:ica", "Industria y comercio (ICA)"], ["impuestos:res:anio", "Resumen del año"], ["impuestos:res:conc", "Conciliación de ingresos"], ["impuestos:res:comp", "Ajustes próxima declaración"], ["impuestos:res:renta", "Proyección de renta"], ["renta", "Declaraciones de renta presentadas (110)"]] },
     { g: "Requerimientos DIAN", ico: "req", items: [["req", "Requerimientos y respuestas"]] },
-    { g: "Verificación DIAN", ico: "dian", items: [["dian:resumen", "Resumen y carga de archivos"], ["dian:pendientes", "Por registrar en el software"], ["dian:diferencias", "Diferencias de valor e IVA"], ["dian:libros", "En el software sin la DIAN"], ["dian:detalle", "Consultar documentos"]] },
+    { g: "Verificación DIAN", ico: "dian", items: [["dian:resumen", "Resumen y carga de archivos"], ["dian:pendientes", "Pendientes por mes"], ["dian:diferencias", "Diferencias de valor e IVA"], ["dian:libros", "En el software sin la DIAN"], ["dian:detalle", "Consultar documentos"]] },
     { g: "Tesorería", ico: "bancos", items: [["bancos:resumen", "Conciliaciones bancarias"], ["bancos:cargar", "Cargar libro y extracto"], ["bancos:config", "Parámetros de conciliación"]] },
     { g: "Cartera y proveedores", ico: "cartera", items: [["terceros:cxc", "Cuentas por cobrar"], ["terceros:cxp", "Cuentas por pagar"], ["prov", "Proveedores por pagar (vencimientos)"]] },
     { g: "Datos", ico: "datos", items: [["cargar", "Cargar archivos"], ["revision", "Revisión del balance"], ["firmas", "Firmas"], ["config", "Configuración"]] },
@@ -8661,6 +8661,8 @@ const VerifDian = (() => {
         <div class="kpi ${V.dif + C.dif ? "dn-alerta" : "dn-bien"}"><span>Con diferencias de valor o IVA</span><b>${fmt(V.dif + C.dif)}</b><small>${fmt(V.red + C.red)} más con diferencias de redondeo</small></div>
         <div class="kpi ${X.resumen.libroVentas.n + X.resumen.libroCompras.n ? "dn-alerta" : "dn-bien"}"><span>En el software sin la DIAN</span><b>${fmt(X.resumen.libroVentas.n + X.resumen.libroCompras.n)}</b><small>IVA descontable sin soporte $ ${fmt(X.resumen.libroCompras.iva)}</small></div>
       </div>`;
+    html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:baseline"><h2>Qué falta por mes</h2><button class="btn chico" data-nav="dian:pendientes">Ver todos los pendientes</button></div>
+      <p class="sub">Lo que queda por resolver, por mes y por tipo. «Ver el mes» abre la lista de documentos con lo que hay que hacer en cada uno.</p>${tablaMesesDN(tareasDN(X), true)}</section>`;
     const H = hallazgosDN(X);
     html += `<section class="panel"><h2>Hallazgos</h2><ul class="hallazgos">${H.map(([t, m, b]) => `<li><span class="chip ${t}">${{ ok: "Correcto", info: "Dato", advertencia: "Revisar", error: "Atención" }[t]}</span> ${m} ${b}</li>`).join("")}</ul></section>`;
     // Mes a mes
@@ -8704,18 +8706,87 @@ const VerifDian = (() => {
       <tbody>${filas}${totFila}</tbody></table></div>${xs.length > lim ? `<div class="fila" style="justify-content:center;margin-top:10px"><span class="pie" style="margin:0">Se muestran ${fmt(lim)} de ${fmt(xs.length)}.</span><button class="btn chico" data-dn="mas">Ver más</button></div>` : ""}`;
   }
 
+  /* ---------- Pendientes por mes: qué hay que hacer, documento por documento */
+  const CATS_DN = [
+    ["regC", "Compras y gastos por registrar", "Están en la DIAN y no en el software. Hay que causarlas en MantisWeb (o marcar en «Revisión» por qué no se registran)."],
+    ["dif", "Registradas con diferencias por corregir", "Están en el software, pero con un valor o un IVA distinto al de la DIAN, o registradas dos veces."],
+    ["regV", "Ventas por registrar", "La DIAN tiene la factura o nota de venta y el software no. Verifique si se anuló solo en el software o si falta el comprobante."],
+    ["sinC", "Compras en el software sin factura electrónica", "Tienen IVA descontable o cuenta por pagar, pero no aparece la factura en la DIAN. Pida la factura al proveedor o corrija el número citado."],
+    ["sinV", "Ventas en el software que no están en la DIAN", "Comprobantes de venta que la DIAN no tiene: facturas no transmitidas, rechazadas o anuladas solo en el software."],
+  ];
+  const CORTO_DN = { regC: "Compras por registrar", dif: "Diferencias por corregir", regV: "Ventas por registrar", sinC: "Compras sin factura en la DIAN", sinV: "Ventas que no están en la DIAN" };
+  function tareasDN(X) {
+    const T = [], $ = (v) => "$ " + fmt(v);
+    const qhDoc = (f) => {
+      if (f.g === "V") return "Buscar el comprobante en el software; si la factura se anuló, debe existir la nota crédito en la DIAN.";
+      if (f.est === "sinc") return `Tiene pagos o anticipos${f.num ? ` (${f.num})` : ""}, pero falta causar la factura.`;
+      const t = tipoTxt(f);
+      return /cr[eé]dito/i.test(t) ? "Registrar la nota crédito del proveedor." : /soporte/i.test(t) ? "Registrar el documento soporte." : `Causar la factura${f.iva ? ` y tomar el IVA descontable de ${$(f.iva)}` : ""}.`;
+    };
+    for (const f of X.pendientes || []) T.push({ cat: f.g === "V" ? "regV" : "regC", mes: (f.f || "").slice(0, 7), f: f.f, doc: f.doc, tipo: tipoTxt(f), nom: f.nom, nit: f.nit, tot: f.tot, iva: f.iva, k: f.k, ant: f.ant, que: qhDoc(f) });
+    for (const f of X.novedades || []) {
+      const o = f.obs || [];
+      if (f.est !== "dif" && !o.includes("dup") && !o.includes("dupAnt")) continue;
+      const q = [];
+      if (o.includes("tot") || (f.est === "dif" && Math.abs(f.dT ?? r2(f.tot - (f.Ltot || 0))) > (X.tol || 0))) q.push(`Total: DIAN ${$(f.tot)}, libro ${$(f.Ltot || 0)}`);
+      if (o.includes("iva") || (f.est === "dif" && Math.abs(f.dI ?? r2(f.iva - (f.Liva || 0))) > (X.tol || 0))) q.push(`IVA: DIAN ${$(f.iva)}, libro ${$(f.Liva || 0)}`);
+      if (o.includes("dup")) q.push(`Registrada más de una vez${(f.dup || []).length ? ` (${f.dup.join(", ")})` : ""}: anule el sobrante`);
+      if (o.includes("dupAnt")) q.push("Ya se había registrado en un período anterior");
+      T.push({ cat: "dif", mes: (f.f || "").slice(0, 7), f: f.f, doc: f.doc, tipo: tipoTxt(f), nom: f.nom, nit: f.nit, tot: f.tot, iva: f.iva, k: f.k, ref: f.num, que: (q.join(". ") || "Revisar el valor registrado") + (f.num ? `. Comprobante ${f.num}.` : ".") });
+    }
+    for (const r of X.libroCompras || []) T.push({ cat: "sinC", mes: (r.f || "").slice(0, 7), f: r.f, doc: r.num, tipo: "Comprobante", nom: r.nom, nit: r.nit, tot: (r.base || 0) + (r.iva || 0), iva: r.iva, ref: r.num, que: r.fac ? `Cita la factura ${r.fac}, que no está en la DIAN: verifique el número o pídala al proveedor.` : "No cita número de factura: identifique el documento del proveedor." });
+    for (const r of X.libroVentas || []) T.push({ cat: "sinV", mes: (r.f || "").slice(0, 7), f: r.f, doc: r.num, tipo: "Comprobante de venta", nom: r.nom, nit: r.nit, tot: r.tot, iva: r.iva, ref: r.num, que: "Verificar en el proveedor de facturación si se transmitió; si se anuló, debe anularse también en el software." });
+    return T;
+  }
+  const pendDN = (t) => !(t.k && justificada({ k: t.k }));
+  /** Tabla «qué falta por mes» (resumen y vista de pendientes). */
+  function tablaMesesDN(T, conBoton) {
+    const meses = [...new Set(T.map((t) => t.mes).filter(Boolean))].sort();
+    if (!meses.length) return `<div class="aviso ok"><p><b>Todo al día.</b> No hay documentos pendientes ni diferencias por corregir.</p></div>`;
+    const celda = (xs) => xs.length ? `<td class="num"><b>${fmt(xs.length)}</b><small>$ ${fmt(xs.reduce((s, t) => s + (t.tot || 0), 0))}</small></td>` : `<td class="num" style="color:var(--ok)">✓</td>`;
+    const fila = (mes, xs, tot) => {
+      const p = xs.filter(pendDN), n = p.length;
+      return `<tr class="${tot ? "dn-tot" : ""}"><td><b>${tot ? "Total" : esc(mesTexto(mes))}</b></td>${CATS_DN.map(([c]) => celda(p.filter((t) => t.cat === c))).join("")}
+        <td>${n ? `<span class="chip error n">${fmt(n)} por resolver</span>` : `<span class="chip ok n">✓ al día</span>`}${xs.length - n ? `<small>${fmt(xs.length - n)} revisados</small>` : ""}</td>
+        ${conBoton ? `<td>${tot ? "" : `<button class="btn chico" data-dnmes="${mes}" data-dnir="pendientes">Ver el mes</button>`}</td>` : ""}</tr>`;
+    };
+    return `<div class="tabla-env"><table class="lista dn"><thead><tr><th>Mes</th>${CATS_DN.map(([c]) => `<th class="num" style="white-space:normal;max-width:120px">${esc(CORTO_DN[c])}</th>`).join("")}<th>Estado</th>${conBoton ? "<th></th>" : ""}</tr></thead>
+      <tbody>${meses.map((m) => fila(m, T.filter((t) => t.mes === m))).join("")}${meses.length > 1 ? fila("", T, true) : ""}</tbody></table></div>
+      <p class="pie">Cada casilla: número de documentos y valor total. Los marcados en «Revisión» como rechazados, de otra empresa o revisados no cuentan como pendientes.</p>`;
+  }
   function dnPendientes(X) {
-    const P = filtrarDN(X.pendientes || [], { rev: true });
-    const orden = (a, b) => a.f.localeCompare(b.f) || a.doc.localeCompare(b.doc);
-    const comp = P.filter((f) => f.g === "C").sort(orden), vent = P.filter((f) => f.g === "V").sort(orden);
-    let html = cabeceraDN(X, "Por registrar en el software", `Documentos que están en la DIAN y no en el libro auxiliar de ${esc(textoPer(X.id))}, más los pendientes que vienen de verificaciones anteriores. Marque en «Revisión» los que no se van a registrar y por qué: la marca se conserva de un mes a otro.`);
-    html += `<section class="panel">${filtrosDN(X, { rev: true })}</section>`;
-    html += `<section class="panel"><h2>Compras, gastos y documento soporte</h2><p class="sub">${fmt(comp.length)} documentos · $ ${fmt(comp.reduce((s, f) => s + f.tot, 0))} · IVA $ ${fmt(comp.reduce((s, f) => s + f.iva, 0))}</p>${tablaDocsDN(comp, { marca: true, total: true, estado: true, vacio: "No hay compras pendientes por registrar." })}</section>`;
-    html += `<section class="panel"><h2>Facturas y notas de venta</h2><p class="sub">${fmt(vent.length)} documentos · $ ${fmt(vent.reduce((s, f) => s + f.tot, 0))}</p>${tablaDocsDN(vent, { marca: true, total: true, estado: true, vacio: "Todas las ventas de la DIAN están en el software." })}</section>`;
+    const Tall = tareasDN(X);
+    const meses = [...new Set(Tall.map((t) => t.mes).filter(Boolean))].sort();
+    if (DN.fMes && !meses.includes(DN.fMes)) DN.fMes = "";
+    const q = DN.filtro.trim().toLowerCase();
+    const T = Tall.filter((t) => (!DN.fMes || t.mes === DN.fMes) && (!q || [t.doc, t.nit, t.nom, t.ref].some((v) => String(v || "").toLowerCase().includes(q))) && (DN.fRev !== "pend" || pendDN(t)));
+    let html = cabeceraDN(X, "Pendientes por mes", `Todo lo que falta por resolver de ${esc(textoPer(X.id))}, separado por mes y por lo que hay que hacer. Las marcas de «Revisión» se conservan de un mes a otro.`);
+    const nMes = (m) => Tall.filter((t) => (!m || t.mes === m) && pendDN(t)).length;
+    html += `<section class="panel"><div class="seg dn-seg" role="group" aria-label="Mes">
+        <button data-dnmes="" aria-pressed="${!DN.fMes}">Todos los meses<span class="chip ${nMes("") ? "error" : "ok"}">${fmt(nMes(""))}</span></button>
+        ${meses.map((m) => `<button data-dnmes="${m}" aria-pressed="${DN.fMes === m}">${esc(mesTexto(m))}<span class="chip ${nMes(m) ? "error" : "ok"}">${fmt(nMes(m))}</span></button>`).join("")}</div>
+      <div class="dn-filtros" style="margin-top:10px"><input type="text" id="dn-filtro" value="${esc(DN.filtro)}" placeholder="Buscar por número, NIT, tercero o comprobante" aria-label="Buscar">
+        <select id="dn-rev" aria-label="Revisión"><option value="">Pendientes y revisados</option><option value="pend" ${DN.fRev === "pend" ? "selected" : ""}>Solo pendientes</option></select></div></section>`;
+    if (!DN.fMes && meses.length > 1) html += `<section class="panel"><h2>Resumen por mes</h2>${tablaMesesDN(Tall, true)}</section>`;
+    CATS_DN.forEach(([c, titulo, ayuda], i) => {
+      const xs = T.filter((t) => t.cat === c).sort((a, b) => (a.f || "").localeCompare(b.f || "") || String(a.doc).localeCompare(String(b.doc)));
+      const p = xs.filter(pendDN);
+      const cab = `<div class="fila" style="justify-content:space-between;align-items:baseline"><h2>${i + 1}. ${esc(titulo)}</h2><span>${p.length ? `<span class="chip error n">${fmt(p.length)} por resolver</span> <b>$ ${fmt(p.reduce((s, t) => s + (t.tot || 0), 0))}</b>${p.some((t) => t.iva) ? ` · IVA $ ${fmt(p.reduce((s, t) => s + (t.iva || 0), 0))}` : ""}` : `<span class="chip ok n">✓ nada pendiente</span>`}</span></div>`;
+      if (!xs.length) { html += `<section class="panel">${cab}</section>`; return; }
+      const lim = DN.limite || 300, ys = xs.slice(0, lim);
+      html += `<section class="panel">${cab}<p class="sub">${esc(ayuda)}</p>
+        <div class="tabla-env"><table class="lista dn"><thead><tr><th>Fecha</th><th>Documento</th><th>Tercero</th><th class="num">Total</th><th class="num">IVA</th><th>Qué hacer</th><th>Revisión</th></tr></thead><tbody>
+        ${ys.map((t) => `<tr class="${pendDN(t) ? "" : "justif"}"><td>${esc(fechaC(t.f))}</td><td><b>${esc(t.doc)}</b><small>${esc(t.tipo)}</small></td><td class="nom">${esc(t.nom)}<small>NIT ${esc(t.nit)}</small></td>${montoDN(t.tot)}${montoDN(t.iva)}
+          <td style="white-space:normal;min-width:260px">${esc(t.que)}${t.ant ? ` ${chipDN([`Viene de ${textoPer(t.ant)}`, "advertencia"])}` : ""}</td>
+          <td>${t.k ? `<select class="dn-marca" data-dnmarca="${esc(t.k)}" aria-label="Revisión">${MARCAS_DN.map(([v, tx]) => `<option value="${v}" ${(DN.marcas[t.k]?.e || "") === v ? "selected" : ""}>${esc(tx)}</option>`).join("")}</select>` : `<small>Se corrige en el software</small>`}</td></tr>`).join("")}
+        </tbody></table></div>${xs.length > lim ? `<div class="fila" style="justify-content:center;margin-top:10px"><span class="pie" style="margin:0">Se muestran ${fmt(lim)} de ${fmt(xs.length)}.</span><button class="btn chico" data-dn="mas">Ver más</button></div>` : ""}</section>`;
+    });
     const reg = filtrarDN(X.regularizadas || []);
-    if (reg.length) html += `<section class="panel"><h2>Pendientes anteriores que ya se registraron</h2><p class="sub">Venían pendientes de ${esc(textoPer(X.previo))} y aparecen en el libro de este período.</p>${tablaDocsDN(reg, { libro: true, estado: true, total: true })}</section>`;
+    if (reg.length) html += `<details class="conf"><summary>Pendientes anteriores que ya se registraron (${fmt(reg.length)})</summary><div><p class="sub">Venían pendientes de ${esc(textoPer(X.previo))} y aparecen en el libro de este período.</p>${tablaDocsDN(reg, { libro: true, estado: true, total: true })}</div></details>`;
     const an = filtrarDN(X.anuladas || []);
-    if (an.length) html += `<details class="conf"><summary>Anuladas entre sí: factura y nota crédito del mismo valor, sin registrar (${fmt(an.length)})</summary><div>${tablaDocsDN(an, {})}<p class="pie" style="margin:0">El proveedor emitió la factura y la anuló con una nota crédito por el mismo valor; ninguna de las dos se registró. Si alguna sí debía registrarse, búsquela en la DIAN.</p></div></details>`;
+    if (an.length) html += `<details class="conf"><summary>Anuladas entre sí: factura y nota crédito del mismo valor, sin registrar (${fmt(an.length)})</summary><div>${tablaDocsDN(an, {})}<p class="pie" style="margin:0">El proveedor emitió la factura y la anuló con una nota crédito por el mismo valor; ninguna de las dos se registró. No requieren registro.</p></div></details>`;
+    const inf = (X.novedades || []).filter((f) => f.est !== "dif" && (f.obs || []).some((o) => ["mes", "nit", "ivaCosto", "aprox"].includes(o))).length;
+    if (inf) html += `<p class="pie">Además hay ${fmt(inf)} documentos registrados con observaciones informativas (otro mes, otro tercero, IVA llevado al costo o sin número de factura). Están en «Diferencias de valor e IVA».</p>`;
     return html;
   }
 
@@ -8810,6 +8881,7 @@ const VerifDian = (() => {
   /* ---------- eventos del módulo */
   function clicDian(t) {
     if (t.id === "zona-dn") { $("#archivo-dn").click(); return true; }
+    if (t.dataset.dnmes !== undefined) { DN.fMes = t.dataset.dnmes; DN.limite = 300; if (t.dataset.dnir) DN.vista = t.dataset.dnir; render(); if (t.dataset.dnir) window.scrollTo(0, 0); return true; }
     if (t.dataset.dndif !== undefined) { DN.fDif = t.dataset.dndif; DN.limite = 300; render(); return true; }
     const a = t.dataset.dn; if (!a) return false;
     if (a === "excel") exportarDN();
@@ -11487,14 +11559,14 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
 
   /* ------------------------------------------------------------ eventos */
   document.addEventListener("click", (ev) => {
-    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],[data-rq],#zona-rq,#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt");
+    const t = ev.target.closest("[data-nav],[data-tab],[data-ir],[data-accion],[data-vista],[data-impvista],[data-resvista],[data-pygsede],[data-terver],[data-exportar],[data-bc],[data-bctab],[data-bcexp],[data-grupo],[data-pv],[data-pvexp],[data-pvbase],[data-pvprio],[data-pvabrir],[data-pvsel],[data-pvexcl],[data-pvincl],[data-dn],[data-dndif],[data-cq],[data-an],[data-rt],[data-rq],#zona-rq,#zona,#zona-imp,#zona-decl,#zona-bc,#zona-pv,#zona-dn,#zona-cq,#zona-an,#zona-rt,[data-dnmes]");
     if (!t) return;
     if ((t.id === "zona-rt" || t.dataset.rt) && clicRenta(t)) return;
     if (t.id === "zona-rq") return $("#archivo-rq-nuevo").click();
     if (t.dataset.rq && clicReq(t)) return;
     if ((t.id === "zona-an" || t.dataset.an) && clicAnual(t)) return;
     if ((t.id === "zona-cq" || t.dataset.cq) && clicConsulta(t)) return;
-    if ((t.id === "zona-dn" || t.dataset.dn || t.dataset.dndif !== undefined) && clicDian(t)) return;
+    if ((t.id === "zona-dn" || t.dataset.dn || t.dataset.dndif !== undefined || t.dataset.dnmes !== undefined) && clicDian(t)) return;
     if (t.id === "zona-pv") return $("#archivo-pv").click();
     if (t.dataset.pvexp) return exportarPV(t.dataset.pvexp);
     if (t.dataset.pvbase) { S.pv.base = t.dataset.pvbase; return render(); }
