@@ -5782,7 +5782,7 @@ const VerifDian = (() => {
     const [anio] = anioMes(periodo);
     const sumar = (lista, n) => lista.reduce((s, x) => s + (x[n] || 0), 0);
     // ---- Retención (mensual)
-    const ret = { incl: [], excl: [] }, retCalc = [], retDec = [];
+    const ret = { incl: [], excl: [], det: [] }, retCalc = [], retDec = [];
     const valsRet = (L) => { const a = L.autorrets.reduce((s, x) => s + x.baseR, 0), ar = L.autorrets.reduce((s, x) => s + x.retencionR, 0); return { 59: a, 68: ar, ter: L.totalRenta - ar, 130: L.totalRenta, 134: L.totalIva, 136: L.total }; };
     let ultRet = 0;
     for (let m = 1; m <= 12; m++) {
@@ -5792,8 +5792,9 @@ const VerifDian = (() => {
       if (!S.hist.has(per)) { ret.excl.push(m); continue; }
       // Solo lo causado en cada mes: un saldo anterior incluido en otra declaración ya se contó en su mes de origen.
       // En enero sí cuentan (vienen del año anterior, que no está en este acumulado).
-      ret.incl.push(m); retCalc.push(valsRet(liquidacion(per, { sinSaldos: m > 1 })));
-      retDec.push({ 59: d.R[59] || 0, 68: d.R[68] || 0, ter: (d.R[130] || 0) - (d.R[68] || 0), 130: d.R[130] || 0, 134: d.R[134] || 0, 136: d.R[136] || 0 });
+      const cR = valsRet(liquidacion(per, { sinSaldos: m > 1 }));
+      const dR = { 59: d.R[59] || 0, 68: d.R[68] || 0, ter: (d.R[130] || 0) - (d.R[68] || 0), 130: d.R[130] || 0, 134: d.R[134] || 0, 136: d.R[136] || 0 };
+      ret.incl.push(m); retCalc.push(cR); retDec.push(dR); ret.det.push({ p: m, calc: cR, dec: dR });
     }
     ret.sig = ultRet && ultRet < 12 ? `${anio}-${String(ultRet + 1).padStart(2, "0")}` : null;
     ret.sigCalc = ret.sig && S.hist.has(ret.sig) ? valsRet(liquidacion(ret.sig, { sinSaldos: true })) : null;
@@ -5802,8 +5803,10 @@ const VerifDian = (() => {
       const sc = ret.sigCalc ? ret.sigCalc[n] : null;
       return { txt, n: typeof n === "number" ? String(n) : "", libros, decl, aj, sigCalc: sc, sigSug: sc == null ? null : sc + aj };
     });
+    ret.ajuste = Object.fromEntries(["ter", 59, 68, 130, 134, 136].map((n) => [n, sumar(retCalc, n) - sumar(retDec, n)]));
+    ret.sugerido = ret.sigCalc ? Object.fromEntries(Object.keys(ret.ajuste).map((n) => [n, (ret.sigCalc[n] || 0) + ret.ajuste[n]])) : null;
     // ---- IVA (bimestral)
-    const iva = { incl: [], excl: [] }, ivaCalc = [], ivaDec = [];
+    const iva = { incl: [], excl: [], det: [] }, ivaCalc = [], ivaDec = [];
     let ultI = 0;
     for (let b = 1; b <= 6; b++) {
       const d = S.decl.get(`300-${anio}-${String(b).padStart(2, "0")}`);
@@ -5812,7 +5815,8 @@ const VerifDian = (() => {
       // Solo el movimiento de cada bimestre: un saldo pendiente que se declaró después ya se contó en su bimestre de origen.
       const mI = modeloIva(`${anio}-${String(2 * b).padStart(2, "0")}`, { sinSaldos: b > 1 });
       if (mI.error) { iva.excl.push(b); continue; }
-      iva.incl.push(b); ivaCalc.push(mI.X.R); ivaDec.push(Object.fromEntries(Object.entries(d.R).map(([k, v]) => [k, v || 0])));
+      const dI = Object.fromEntries(Object.entries(d.R).map(([k, v]) => [k, v || 0]));
+      iva.incl.push(b); ivaCalc.push(mI.X.R); ivaDec.push(dI); iva.det.push({ p: b, calc: mI.X.R, dec: dI });
     }
     iva.sig = ultI && ultI < 6 ? ultI + 1 : null;
     const mSig = iva.sig ? modeloIva(`${anio}-${String(2 * iva.sig).padStart(2, "0")}`, { sinSaldos: true }) : null;
@@ -5828,6 +5832,7 @@ const VerifDian = (() => {
       s[88] = Math.max(neto, 0) + (c[87] || 0);
       sugI = s;
     }
+    iva.ajuste = ajI; iva.sugerido = sugI;
     iva.filas = RI.map((n) => ({ txt: (Impuestos.RENGLONES_IVA.find((r) => r[0] === n) || [])[1], n: String(n), libros: sumar(ivaCalc, n), decl: sumar(ivaDec, n), aj: ajI[n], sigCalc: iva.sigCalc ? iva.sigCalc[n] ?? 0 : null, sigSug: sugI ? sugI[n] : null, tot: [41, 43, 67, 81, 88].includes(n) }));
     // ---- ICA (bimestral)
     // Los libros se liquidan siempre con la estructura completa del formulario (ingresos brutos, menos los de fuera
@@ -5842,7 +5847,7 @@ const VerifDian = (() => {
       const mC = modeloIca(`${anio}-${String(2 * b).padStart(2, "0")}`, { metodo: "distrito" });
       if (mC.error) { ica.excl.push(b); continue; }
       const dec = Object.fromEntries(Object.entries(d.R).map(([k, v]) => [k, v || 0]));
-      ica.incl.push(b); icaCalc.push(mC.X.R); icaDec.push(dec); ica.det.push({ b, calc: mC.X.R, dec });
+      ica.incl.push(b); icaCalc.push(mC.X.R); icaDec.push(dec); ica.det.push({ p: b, calc: mC.X.R, dec });
     }
     ica.sig = ultC && ultC < 6 ? ultC + 1 : null;
     const cSig = ica.sig ? modeloIca(`${anio}-${String(2 * ica.sig).padStart(2, "0")}`, { metodo: "distrito" }) : null;
@@ -5895,72 +5900,116 @@ const VerifDian = (() => {
       </div>
       <div class="aviso advertencia" style="margin-top:12px"><p>Llevar la diferencia al período siguiente es un ajuste práctico. Lo técnicamente correcto es corregir la declaración del período en que se originó. Si se traslada a un período posterior un valor a pagar, la DIAN o el distrito pueden cobrar intereses de mora por el tiempo de diferencia. Si lo que sobra es un pago de más, se recupera con una corrección o una solicitud de devolución o compensación. Revíselo con el revisor fiscal antes de aplicarlo.</p></div>
     </section>`;
-    return html + vistaIcaExplicada(A) + modeloHTML(modeloCompensar(p, { sinIca: true }));
+    return html + vistaRetExplicada(A) + vistaIvaExplicada(A) + vistaIcaExplicada(A);
   }
-  /** ICA paso a paso: qué se declaró de más o de menos en cada renglón y qué poner en el próximo bimestre. */
-  function vistaIcaExplicada(A) {
-    const X = A.ica, mun = esc(S.cfg.impuestos.ica.municipio);
-    const titulo = `<h2>ICA ${mun}: qué se declaró de más o de menos</h2>`;
-    if (!X.det.length) return `<section class="panel">${titulo}<p class="sub">Aún no hay declaraciones de ICA de ${A.anio} con su balance cargado. Cargue los formularios presentados en «Resumen del año» para poder comparar.</p>${X.excl.length ? `<div class="aviso advertencia"><p>Hay declaraciones de ${esc(X.excl.map((b) => NOMBRE_BIM[b - 1]).join(", "))} sin los balances de esos meses.</p></div>` : ""}</section>`;
-    const S0 = (lista, n) => lista.reduce((s, x) => s + (x[n] || 0), 0);
-    const tot = (n) => ({ libros: S0(X.det.map((d) => d.calc), n), decl: S0(X.det.map((d) => d.dec), n) });
+  /**
+   * Panel explicado de ajustes de un impuesto: conclusión en palabras, acumulado renglón por renglón,
+   * qué poner en la próxima declaración y detalle por período.
+   * D: { titulo, intro, X (det, ajuste, sugerido, sigCalc, incl, excl), sigTxt, nomPer, RENG, CLAVE, SUG, DET, vacio }
+   * RENG: [n, texto, verbo ("declaró" | "restó" | "descontó" | "pagó"), ayuda, esTotal]
+   */
+  function panelAjuste(D) {
+    const X = D.X, titulo = `<h2>${D.titulo}</h2>`;
+    const pers = (arr) => esc(arr.map(D.nomPer).join(", "));
+    if (!X.det.length) return `<section class="panel">${titulo}<p class="sub">${D.vacio}</p>${X.excl.length ? `<div class="aviso advertencia"><p>Hay declaraciones de ${pers(X.excl)} sin los balances de esos meses.</p></div>` : ""}</section>`;
+    const sum = (a) => a.reduce((s, v) => s + v, 0);
+    const tot = (n) => ({ libros: sum(X.det.map((d) => d.calc[n] || 0)), decl: sum(X.det.map((d) => d.dec[n] || 0)) });
     const f$ = (v) => `$ ${fmt(Math.abs(v))}`;
-    const fuera = X.centrosFuera.length ? `centro${X.centrosFuera.length > 1 ? "s" : ""} de costo ${X.centrosFuera.map(esc).join(", ")}` : "ningún centro configurado";
-    // Cada renglón con su lectura en palabras: los renglones 9, 11 y 14 restan, por eso "restó de más".
-    const RENG = [
-      [8, "Ingresos brutos (todo el país)", "suma", "Lo que reportó como ingresos brutos totales."],
-      [9, `Ingresos fuera de ${mun}`, "resta", `Ventas de ${fuera}, que no tributan aquí.`],
-      [11, "Devoluciones, rebajas y descuentos", "resta", "Cuenta " + esc((S.cfg.impuestos.ica.devoluciones || []).join(", ")) + " del distrito."],
-      [14, "Ingresos no gravados", "resta", "Otros ingresos (" + esc((S.cfg.impuestos.ica.otrosIngresos || []).join(", ")) + ") que no se gravan."],
-      [16, "Base gravable", "total", "8 − 9 − 11 − 14. Es la que define el impuesto."],
-      [22, "Impuesto a cargo", "total", "ICA + avisos y tableros + sobretasa bomberil."],
-      [24, "Retenciones de ICA que le practicaron", "resta", "Cuenta " + esc((S.cfg.impuestos.ica.retenciones || []).join(", ")) + "."],
-      [34, "Total pagado", "total", "Impuesto a cargo menos retenciones de ICA."],
-    ];
-    const lectura = (n, tipo, aj) => {
+    const sig = esc(D.sigTxt);
+    const chip = (verbo, aj) => {
       if (Math.abs(aj) < 1000) return `<span class="chip ok n">✓ coincide</span>`;
       const mas = aj < 0; // libros − declarado < 0: en el formulario quedó más que en libros
-      const txt = tipo === "resta" ? (mas ? "restó de más" : "restó de menos") : n === 34 ? (mas ? "pagó de más" : "pagó de menos") : (mas ? "declaró de más" : "declaró de menos");
-      return `<span class="chip ${mas ? "info" : "advertencia"} n">${txt} ${f$(aj)}</span>`;
+      return `<span class="chip ${mas ? "info" : "advertencia"} n">${verbo} de ${mas ? "más" : "menos"} ${f$(aj)}</span>`;
     };
-    const filasRes = RENG.map(([n, txt, tipo, ayuda]) => {
+    const filasRes = D.RENG.map(([n, txt, verbo, ayuda, total]) => {
       const t = tot(n), aj = t.libros - t.decl;
-      return `<tr class="${tipo === "total" ? "subtotal" : "rubro"}"><td>${esc(txt)}<br><small style="color:var(--suave);font-weight:400">${ayuda}</small></td><td class="nota">${n}</td><td>${fmt(t.libros)}</td><td>${fmt(t.decl)}</td><td class="${aj < 0 ? "neg" : ""}">${fmt(aj)}</td><td style="text-align:left">${lectura(n, tipo, aj)}</td></tr>`;
+      return `<tr class="${total ? "subtotal" : "rubro"}"><td>${esc(txt)}<br><small style="color:var(--suave);font-weight:400">${ayuda}</small></td><td class="nota">${typeof n === "number" ? n : ""}</td><td>${fmt(t.libros)}</td><td>${fmt(t.decl)}</td><td class="${aj < 0 ? "neg" : ""}">${fmt(aj)}</td><td style="text-align:left">${chip(verbo, aj)}</td></tr>`;
     }).join("");
-    const aj16 = X.ajuste[16] || 0, aj22 = X.ajuste[22] || 0, aj24 = X.ajuste[24] || 0;
-    const conclusion = Math.abs(aj16) < 1000
-      ? `<div class="aviso ok"><p><b>La base gravable acumulada coincide con los libros.</b> No hay ajuste de ICA pendiente para el ${esc(A.ica.sigTxt)}.</p></div>`
-      : `<div class="aviso ${aj16 < 0 ? "info" : "advertencia"}"><p><b>${aj16 < 0 ? `Declaró ${f$(aj16)} de más en base gravable` : `Declaró ${f$(aj16)} de menos en base gravable`}</b> entre ${esc(X.incl.map((b) => NOMBRE_BIM[b - 1]).join(", "))}. ${aj16 < 0 ? `Para compensarlo, en el ${esc(A.ica.sigTxt)} declare esa cifra menos de base gravable` : `Para ponerse al día, en el ${esc(A.ica.sigTxt)} declare esa cifra más de base gravable`}. En impuesto a cargo (renglón 22), eso equivale a ${f$(aj22)} ${aj22 < 0 ? "de más" : "de menos"}.${Math.abs(aj24) >= 1000 ? ` Aparte, las retenciones de ICA declaradas ${aj24 < 0 ? "superan" : "son menores que"} las de libros en ${f$(aj24)}: revíselas, porque también cambian el total a pagar.` : ""}</p></div>`;
-    // Qué poner en el próximo bimestre.
+    // Conclusión: los renglones clave, en palabras.
+    const claves = D.CLAVE.map(([n, txt, verbo]) => ({ txt, verbo, aj: X.ajuste[n] || 0 })).filter((c) => Math.abs(c.aj) >= 1000);
+    const conclusion = !claves.length
+      ? `<div class="aviso ok"><p><b>Lo declarado en ${pers(X.incl)} coincide con los libros.</b> No hay ajuste pendiente para ${sig}.</p></div>`
+      : `<div class="aviso ${claves[0].aj < 0 ? "info" : "advertencia"}"><div><p style="margin:0">Entre ${pers(X.incl)}:</p><ul style="margin:4px 0 0 18px;padding:0">${claves.map((c) => `<li><b>${esc(c.txt)}:</b> ${c.verbo.toLowerCase()} ${f$(c.aj)} de ${c.aj < 0 ? "más" : "menos"}. ${c.aj < 0 ? `Para compensarlo, en ${sig} declare esa cifra menos.` : `Para ponerse al día, en ${sig} declare esa cifra más.`}</li>`).join("")}</ul></div></div>`;
     let prox = "";
     if (X.sigCalc && X.sugerido) {
-      const SUG = [[8, "Ingresos brutos (todo el país)"], [9, `Menos ingresos fuera de ${mun}`], [11, "Menos devoluciones, rebajas y descuentos"], [14, "Menos ingresos no gravados"], [16, "Base gravable"], [18, "Impuesto de industria y comercio"], [22, "Total impuesto a cargo"], [24, "Menos retenciones de ICA"], [34, "Total a pagar"]];
-      prox = `<h3 style="margin-top:18px">Qué poner en el ${esc(A.ica.sigTxt)}</h3>
-        <p class="sub">«Según libros» es el bimestre tal como sale de los balances. «Ajuste» es lo acumulado de la tabla anterior. «A declarar» es la suma de los dos: es lo que iría en el formulario si decide compensar en este bimestre.</p>
+      const neg = D.SUG.filter(([n]) => (X.sugerido[n] || 0) < 0).map(([n]) => n);
+      prox = `<h3 style="margin-top:18px">Qué poner en ${sig}</h3>
+        <p class="sub">«Según libros» es el período tal como sale de los balances. «Ajuste» es lo acumulado de la tabla anterior. «A declarar» es la suma de los dos: lo que iría en el formulario si decide compensar en este período.</p>
         <div class="tabla-env"><table class="ef"><thead><tr><th>Renglón del formulario</th><th>N.°</th><th>Según libros</th><th>Ajuste</th><th>A declarar</th></tr></thead><tbody>
-        ${SUG.map(([n, txt]) => { const c = X.sigCalc[n] || 0, sg = X.sugerido[n] || 0, tt = [16, 22, 34].includes(n); return `<tr class="${tt ? "subtotal" : "rubro"}${sg < 0 ? " alerta" : ""}"><td>${esc(txt)}</td><td class="nota">${n}</td><td>${fmt(c)}</td><td class="${sg - c < 0 ? "neg" : ""}">${Math.abs(sg - c) < 1 ? "—" : fmt(sg - c)}</td><td><b>${fmt(sg)}</b></td></tr>`; }).join("")}
+        ${D.SUG.map(([n, txt, total]) => { const c = X.sigCalc[n] || 0, sg = X.sugerido[n] || 0; return `<tr class="${total ? "subtotal" : "rubro"}${sg < 0 ? " alerta" : ""}"><td>${esc(txt)}</td><td class="nota">${typeof n === "number" ? n : ""}</td><td>${fmt(c)}</td><td class="${sg - c < 0 ? "neg" : ""}">${Math.abs(sg - c) < 1 ? "—" : fmt(sg - c)}</td><td><b>${fmt(sg)}</b></td></tr>`; }).join("")}
         </tbody></table></div>
-        ${X.negativos?.length ? `<div class="aviso error"><p>El ajuste deja en negativo ${X.negativos.length === 1 ? "el renglón" : "los renglones"} ${X.negativos.join(", ")}, y el formulario no lo admite. La diferencia es mayor que lo del bimestre: lleve solo una parte ahora y el resto en el siguiente, o corrija la declaración donde se originó.</p></div>` : ""}`;
-    } else if (A.ica.sig) prox = `<div class="aviso advertencia" style="margin-top:12px"><p>Para ver qué poner en el ${esc(A.ica.sigTxt)}, cargue los balances de los dos meses de ese bimestre.</p></div>`;
-    // Detalle por bimestre: dónde se originó cada diferencia.
-    const DET = [[8, "Ingresos brutos"], [9, `Fuera de ${mun}`], [11, "Devoluciones"], [14, "No gravados"], [16, "Base gravable"], [34, "Total pagado"]];
-    const cab = X.det.map((d) => `<th>${esc(NOMBRE_BIM[d.b - 1])}</th>`).join("") + "<th>Total</th>";
-    const det = DET.map(([n, txt]) => {
+        ${neg.length ? `<div class="aviso error"><p>El ajuste deja en negativo ${neg.length === 1 ? "el renglón" : "los renglones"} ${neg.map((n) => typeof n === "number" ? n : D.SUG.find((x) => x[0] === n)[1]).join(", ")}, y el formulario no lo admite. La diferencia es mayor que lo del período: lleve solo una parte ahora y el resto en el siguiente, o corrija la declaración donde se originó.</p></div>` : ""}`;
+    } else if (D.sigTxt && D.sigTxt !== "—") prox = `<div class="aviso advertencia" style="margin-top:12px"><p>Para ver qué poner en ${sig}, cargue los balances de ese período.</p></div>`;
+    const cab = X.det.map((d) => `<th>${esc(D.nomPer(d.p))}</th>`).join("") + "<th>Total</th>";
+    const det = D.DET.map(([n, txt]) => {
       const l = X.det.map((d) => d.calc[n] || 0), dc = X.det.map((d) => d.dec[n] || 0), df = l.map((v, i) => v - dc[i]);
-      const sum = (a) => a.reduce((s, v) => s + v, 0);
-      const fila = (et, arr, cls = "") => `<tr class="${cls}"><td style="padding-left:20px">${et}</td>${[...arr, sum(arr)].map((v) => `<td class="${cls.includes("dif") && Math.abs(v) >= 1000 ? (v < 0 ? "neg" : "") : ""}">${fmt(v)}</td>`).join("")}</tr>`;
-      return `<tr class="seccion"><td colspan="${X.det.length + 2}">${n} · ${esc(txt)}</td></tr>${fila("Libros", l, "rubro")}${fila("Declarado", dc, "rubro")}${fila("Diferencia", df, `subtotal dif${df.some((v) => Math.abs(v) >= 1000) ? " alerta" : ""}`)}`;
+      const fila = (et, arr, cls, dif) => `<tr class="${cls}"><td style="padding-left:20px">${et}</td>${[...arr, sum(arr)].map((v) => `<td class="${dif && v <= -1000 ? "neg" : ""}">${fmt(v)}</td>`).join("")}</tr>`;
+      return `<tr class="seccion"><td colspan="${X.det.length + 2}">${typeof n === "number" ? n + " · " : ""}${esc(txt)}</td></tr>${fila("Libros", l, "rubro")}${fila("Declarado", dc, "rubro")}${fila("Diferencia", df, `subtotal${df.some((v) => Math.abs(v) >= 1000) ? " alerta" : ""}`, true)}`;
     }).join("");
     return `<section class="panel">${titulo}
-      <p class="sub">Compara, renglón por renglón, lo que dicen los balances con lo que se presentó en los formularios de ${esc(X.incl.map((b) => NOMBRE_BIM[b - 1]).join(", "))}. Los libros se calculan con la misma estructura del formulario: ingresos brutos, menos los de fuera de ${mun} (${fuera}), menos devoluciones y menos ingresos no gravados.</p>
+      <p class="sub">${D.intro}</p>
       ${conclusion}
       <h3 style="margin-top:18px">Acumulado del año</h3>
       <div class="tabla-env"><table class="ef"><thead><tr><th>Concepto</th><th>Renglón</th><th>Libros</th><th>Declarado</th><th>Diferencia</th><th style="text-align:left">Lectura</th></tr></thead><tbody>${filasRes}</tbody></table></div>
       <p class="pie">Diferencia = libros − declarado. Entre paréntesis (rojo): en el formulario quedó más de lo que dicen los libros.</p>
       ${prox}
-      <details class="conf" style="margin-top:14px"><summary>Ver en qué bimestre se originó cada diferencia</summary><div><div class="tabla-env"><table class="ef"><thead><tr><th>Renglón</th>${cab}</tr></thead><tbody>${det}</tbody></table></div></div></details>
-      ${X.excl.length ? `<div class="aviso advertencia" style="margin-top:10px"><p>No entran en la comparación (falta el balance): ${esc(X.excl.map((b) => NOMBRE_BIM[b - 1]).join(", "))}.</p></div>` : ""}
+      <details class="conf" style="margin-top:14px"><summary>Ver en qué ${D.unidad} se originó cada diferencia</summary><div><div class="tabla-env"><table class="ef"><thead><tr><th>Renglón</th>${cab}</tr></thead><tbody>${det}</tbody></table></div></div></details>
+      ${X.excl.length ? `<div class="aviso advertencia" style="margin-top:10px"><p>No entran en la comparación (falta el balance): ${pers(X.excl)}.</p></div>` : ""}
     </section>`;
+  }
+  function vistaRetExplicada(A) {
+    const X = A.ret;
+    return panelAjuste({ titulo: "Retención en la fuente (350): qué se declaró de más o de menos", X, sigTxt: X.sig ? `la declaración de ${A.ret.sigTxt}` : "—", nomPer: (m) => MESES[m - 1], unidad: "mes",
+      vacio: `Aún no hay formularios 350 de ${A.anio} con su balance y reporte cargados. Cárguelos en «Resumen del año» para poder comparar.`,
+      intro: `Compara, mes a mes, las retenciones causadas en la contabilidad (créditos de las cuentas 2365 y 2367, menos las reversiones) con lo presentado en los formularios 350 de ${esc(X.incl.map((m) => MESES[m - 1]).join(", "))}. Una retención que se causó en un mes y se declaró en otro cuenta solo en su mes de origen.`,
+      RENG: [["ter", "Retenciones practicadas a terceros (renta)", "declaró", "Créditos de la 2365 menos reversiones (renglón 129), sin la autorretención."],
+        [59, "Base de la autorretención especial", "declaró", "Ingresos del mes sobre los que se liquida."],
+        [68, "Autorretención especial", "declaró", "Base × tarifa del CIIU."],
+        [130, "Total retenciones de renta", "declaró", "Terceros + autorretención.", true],
+        [134, "Retenciones de IVA (reteIVA)", "declaró", "Créditos de la 2367 menos reversiones (renglón 133)."],
+        [136, "Total retenciones a pagar", "declaró", "Renta + IVA.", true]],
+      CLAVE: [[136, "Total retenciones", "Declaró"]],
+      SUG: [["ter", "Retenciones a terceros (renta)"], [59, "Base de autorretención"], [68, "Autorretención especial"], [130, "Total retenciones de renta", true], [134, "Retenciones de IVA"], [136, "Total retenciones a pagar", true]],
+      DET: [["ter", "Retenciones a terceros"], [68, "Autorretención"], [134, "ReteIVA"], [136, "Total a pagar"]] });
+  }
+  function vistaIvaExplicada(A) {
+    const X = A.iva;
+    return panelAjuste({ titulo: "IVA (300): qué se declaró de más o de menos", X, sigTxt: X.sig ? `el ${A.iva.sigTxt}` : "—", nomPer: (b) => NOMBRE_BIM[b - 1], unidad: "bimestre",
+      vacio: `Aún no hay formularios 300 de ${A.anio} con sus balances cargados. Cárguelos en «Resumen del año» para poder comparar.`,
+      intro: `Compara, renglón por renglón, el movimiento de las cuentas de IVA de cada bimestre con lo presentado en los formularios 300 de ${esc(X.incl.map((b) => NOMBRE_BIM[b - 1]).join(", "))}.`,
+      RENG: [[28, "Ingresos gravados a la tarifa general", "declaró", "Base del IVA generado (IVA ÷ tarifa)."],
+        [35, "Ingresos exentos", "declaró", ""], [39, "Ingresos excluidos", "declaró", ""], [40, "Ingresos no gravados", "declaró", ""],
+        [41, "Total ingresos brutos", "declaró", "Suma de los anteriores.", true],
+        [42, "Devoluciones en ventas", "restó", ""],
+        [43, "Ingresos netos", "declaró", "41 − 42.", true],
+        [59, "IVA generado a la tarifa general", "declaró", ""],
+        [67, "Total IVA generado", "declaró", "", true],
+        [77, "IVA descontable por compras y servicios", "descontó", ""],
+        [79, "IVA de devoluciones en ventas", "descontó", ""],
+        [81, "Total IVA descontable", "descontó", "", true],
+        [85, "Retenciones de IVA que le practicaron", "restó", ""],
+        [88, "Saldo a pagar", "pagó", "Generado − descontable − retenciones.", true]],
+      CLAVE: [[41, "Ingresos brutos (renglón 41)", "Declaró"], [88, "Saldo a pagar (renglón 88)", "Pagó"]],
+      SUG: [[28, "Ingresos gravados tarifa general"], [35, "Ingresos exentos"], [39, "Ingresos excluidos"], [40, "Ingresos no gravados"], [41, "Total ingresos brutos", true], [42, "Devoluciones en ventas"], [43, "Ingresos netos", true], [59, "IVA generado tarifa general"], [67, "Total IVA generado", true], [77, "IVA descontable"], [79, "IVA devoluciones en ventas"], [81, "Total descontables", true], [85, "Retenciones de IVA"], [88, "Saldo a pagar", true]],
+      DET: [[41, "Ingresos brutos"], [42, "Devoluciones"], [67, "IVA generado"], [81, "IVA descontable"], [85, "Retenciones de IVA"], [88, "Saldo a pagar"]] });
+  }
+  function vistaIcaExplicada(A) {
+    const X = A.ica, ci = S.cfg.impuestos.ica, mun = esc(ci.municipio);
+    const fuera = X.centrosFuera?.length ? `centro${X.centrosFuera.length > 1 ? "s" : ""} de costo ${X.centrosFuera.map(esc).join(", ")}` : "ningún centro configurado";
+    return panelAjuste({ titulo: `ICA ${mun}: qué se declaró de más o de menos`, X, sigTxt: X.sig ? `el ${A.ica.sigTxt}` : "—", nomPer: (b) => NOMBRE_BIM[b - 1], unidad: "bimestre",
+      vacio: `Aún no hay declaraciones de ICA de ${A.anio} con su balance cargado. Cargue los formularios presentados en «Resumen del año» para poder comparar.`,
+      intro: `Compara, renglón por renglón, los balances con lo presentado en los formularios de ${esc(X.incl.map((b) => NOMBRE_BIM[b - 1]).join(", "))}. Los libros se calculan con la misma estructura del formulario: ingresos brutos, menos los de fuera de ${mun} (${fuera}), menos devoluciones y menos ingresos no gravados.`,
+      RENG: [[8, "Ingresos brutos (todo el país)", "declaró", "Lo que reportó como ingresos brutos totales."],
+        [9, `Ingresos fuera de ${ci.municipio}`, "restó", `Ventas de ${fuera}, que no tributan aquí.`],
+        [11, "Devoluciones, rebajas y descuentos", "restó", "Cuenta " + esc((ci.devoluciones || []).join(", ")) + " del distrito."],
+        [14, "Ingresos no gravados", "restó", "Otros ingresos (" + esc((ci.otrosIngresos || []).join(", ")) + ") que no se gravan."],
+        [16, "Base gravable", "declaró", "8 − 9 − 11 − 14. Es la que define el impuesto.", true],
+        [22, "Impuesto a cargo", "declaró", "ICA + avisos y tableros + sobretasa bomberil.", true],
+        [24, "Retenciones de ICA que le practicaron", "restó", "Cuenta " + esc((ci.retenciones || []).join(", ")) + "."],
+        [34, "Total pagado", "pagó", "Impuesto a cargo menos retenciones de ICA.", true]],
+      CLAVE: [[16, "Base gravable (renglón 16)", "Declaró"], [22, "Impuesto a cargo (renglón 22)", "Declaró"], [24, "Retenciones de ICA (renglón 24)", "Restó"]],
+      SUG: [[8, "Ingresos brutos (todo el país)"], [9, `Menos ingresos fuera de ${ci.municipio}`], [11, "Menos devoluciones, rebajas y descuentos"], [14, "Menos ingresos no gravados"], [16, "Base gravable", true], [18, "Impuesto de industria y comercio"], [22, "Total impuesto a cargo", true], [24, "Menos retenciones de ICA"], [34, "Total a pagar", true]],
+      DET: [[8, "Ingresos brutos"], [9, `Fuera de ${ci.municipio}`], [11, "Devoluciones"], [14, "No gravados"], [16, "Base gravable"], [24, "Retenciones de ICA"], [34, "Total pagado"]] });
   }
   function vistaResumenImp() {
     const p = S.periodo, T = tableroAnual(p), D = datosRenta(p), P = D.P, c = D.c, K = conciliacionIngresos(p);
