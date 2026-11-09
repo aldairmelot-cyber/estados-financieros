@@ -5809,6 +5809,14 @@ const VerifDian = (() => {
       Object.assign(R, recalcIca(R, ci, { sanciones: opc.sancionesIca, saldoFavorAnterior: opc.saldoFavorAnteriorIca }));
     } else {
       for (const n of Object.keys(sug)) R[n] = (R[n] || 0) + ((sug[n] || 0) - (base[n] || 0));
+      // Totales y saldos se recalculan desde sus renglones, para que el formulario siempre sume.
+      const sum = (a, b) => { let t = 0; for (let n = a; n <= b; n++) t += R[n] || 0; return t; };
+      R[41] = sum(27, 40); R[43] = R[41] - (R[42] || 0);
+      R[55] = sum(44, 54); R[57] = R[55] - (R[56] || 0);
+      R[67] = sum(58, 66); R[77] = sum(68, 76); R[81] = sum(77, 80);
+      R[82] = Math.max(R[67] - R[81], 0); R[83] = Math.max(R[81] - R[67], 0);
+      const neto = R[82] - (R[84] || 0) - (R[85] || 0) - R[83];
+      R[86] = Math.max(neto, 0); R[88] = R[86] + (R[87] || 0); R[89] = Math.max(-neto - (R[87] || 0), 0);
     }
     for (const n of Object.keys(R)) if (Math.abs((R[n] || 0) - (X0.R[n] || 0)) >= 1) cambios.push([Number(n), X0.R[n] || 0, R[n]]);
     return { ...X0, R, ajusteAplicado: { cambios: cambios.sort((a, b) => a[0] - b[0]) } };
@@ -5903,7 +5911,20 @@ const VerifDian = (() => {
     let sugI = null;
     if (iva.sigCalc) {
       const c = iva.sigCalc, s = {};
-      for (const n of [27, 28, 35, 39, 40, 42, 59, 67, 77, 79, 81, 85]) s[n] = (c[n] || 0) + (ajI[n] || 0);
+      for (const n of [27, 28, 35, 39, 40, 42, 79, 85]) s[n] = (c[n] || 0) + (ajI[n] || 0);
+      // Los totales 67 y 77 no se ajustan solos: la diferencia se reparte en sus renglones de detalle
+      // (lo que difiere en cada uno) y el residuo va al renglón principal (59 y 72). Así el formulario
+      // sigue sumando: 67 = 58 + 59 + 66 y 77 = 71 + 72 + 74 + 75, como lo exige la DIAN.
+      const ajComp = (n) => sumar(ivaCalc, n) - sumar(ivaDec, n);
+      const repartir = (comps, total, principal) => {
+        let resto = ajI[total] || 0;
+        for (const n of comps) { const a = n === principal ? 0 : ajComp(n); s[n] = (c[n] || 0) + a; resto -= a; }
+        s[principal] += resto;
+        s[total] = comps.reduce((t, n) => t + s[n], 0);
+      };
+      repartir([58, 59, 66], 67, 59);
+      repartir([71, 72, 74, 75], 77, 72);
+      s[81] = s[77] + s[79];
       s[41] = (s[27] || 0) + s[28] + s[35] + s[39] + s[40]; s[43] = s[41] - s[42];
       const neto = Math.max(s[67] - s[81], 0) - (c[84] || 0) - s[85];
       s[88] = Math.max(neto, 0) + (c[87] || 0);
