@@ -4021,7 +4021,92 @@ const VerifDian = (() => {
   // Identificador del período: "2026-01_2026-09" o "2026-10".
   const idPeriodo = (desde, hasta) => (mesDe(desde) === mesDe(hasta) ? mesDe(desde) : `${mesDe(desde)}_${mesDe(hasta)}`);
 
-  return { extraer, conciliar, validar, indexar, valorCompra, idPeriodo, tipoCorto, NOMBRE_TIPO, nitN, alnum, digitos, mesDe };
+  const RE_FLETE = /RAPIDISIMO|COORDINADORA|TRANSPORT|LOGISTIC|EXPRESS|\bTCC\b|COLVANES|ENVIA|SERVIENTREGA|DEPRISA|SAFERBO|MENSAJER|ENCOMIENDA|CARGA\b|FLETE|PALMIRA|TRANSPRENSA|REDETRANS|INTERRAPID/i;
+
+  /* ---------------------------------------------------------- revalidar pendientes contra el libro del año
+     Busca cada pendiente en el libro auxiliar completo del año (Consulta de movimientos), no solo en el
+     libro del período verificado. Muchas compras se causan citando otro número (la guía de la
+     transportadora, el consecutivo interno), así que además del número se cruza por proveedor y valor.
+     rows: filas del libro; C: índice de cada columna { cta, comp, tipo, f, nit, conc, fac, obs, obse, d, c }.
+     Devuelve Map(k → { num, fL, como, Ltot }) con los pendientes que sí están registrados. */
+  function revalidar(pend, rows, C, opts = {}) {
+    const tol = Number(opts.tol) > 0 ? Number(opts.tol) : 100;
+    const M = new Map(), porNit = new Map(), porNum = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i], n = nitN(r[C.nit]);
+      const k = r[C.tipo] + "|" + r[C.comp] + "|" + n;
+      let c = M.get(k);
+      if (!c) {
+        c = { k, num: String(r[C.comp] || ""), f: r[C.f] || "", nit: n, cxp: 0, ing: 0, ret: 0, inv: 0, invFac: new Map(), deb: new Map(), caja: false, txt: "", facs: new Set() };
+        M.set(k, c);
+        if (n) { let a = porNit.get(n); if (!a) porNit.set(n, (a = [])); a.push(c); }
+        const an = alnum(c.num); let b = porNum.get(an); if (!b) porNum.set(an, (b = [])); b.push(c);
+      }
+      if (r[C.f] && (!c.f || r[C.f] < c.f)) c.f = r[C.f];
+      const cta = String(r[C.cta] || ""), d = Number(r[C.d]) || 0, cr = Number(r[C.c]) || 0;
+      if (cta.startsWith("22") || cta.startsWith("2335") || cta.startsWith("2380")) c.cxp += cr - d;
+      else if (cta.startsWith("41")) c.ing += cr - d;
+      else if (cta.startsWith("1355")) c.ret += d - cr;
+      else if (cta.startsWith("11")) c.caja = true;
+      else if (cta.startsWith("14")) { c.inv += d - cr; const fa = alnum(r[C.fac]); c.invFac.set(fa, (c.invFac.get(fa) || 0) + d - cr); }
+      if (d - cr > 0.5 && !/^(1355|2[2-4])/.test(cta)) c.deb.set(cta.slice(0, 4), (c.deb.get(cta.slice(0, 4)) || 0) + d - cr);
+      if (r[C.fac]) c.facs.add(alnum(r[C.fac]));
+      c.txt += " " + [r[C.comp], r[C.conc], r[C.fac], r[C.obs], r[C.obse]].filter(Boolean).join(" ");
+    }
+    const res = new Map(), usado = new Set(), usadoFac = new Set();
+    const orden = [...pend].sort((a, b) => (a.f || "").localeCompare(b.f || ""));
+    // Fletes: se causan con la factura de compra de la mercancía, como mayor valor del inventario (cuenta 14).
+    const esFlete = (p) => p.g !== "V" && !p.ds && RE_FLETE.test(p.nom || "");
+    const ctaPrincipal = (c) => [...c.deb.entries()].sort((x, y) => y[1] - x[1]).map(([k]) => k)[0] || "";
+    const marcar = (p, c, como, Ltot) => {
+      const e = { num: c.num, fL: c.f, como, Ltot: r2(Ltot) };
+      if (esFlete(p)) { const at = Math.abs(p.tot); e.flete = true; e.en14 = c.inv >= at - Math.max(tol, at * 0.005); if (!e.en14) e.cta = c.inv > 0.5 ? `14 por $ ${Math.round(c.inv).toLocaleString("es-CO")}, resto en ${ctaPrincipal(c)}` : ctaPrincipal(c); }
+      res.set(p.k, e); usado.add(c.k);
+    };
+
+    // 1 · el libro cita el número del documento (en la factura, el concepto o la observación)
+    for (const p of orden) {
+      if (p.g === "V" || p.ds) {
+        const c = (porNum.get(alnum(p.doc)) || [])[0];
+        if (c) marcar(p, c, "numero", p.tot);
+        continue;
+      }
+      const cs = porNit.get(p.nit) || [], a = alnum(p.doc), dg = digitos(p.folio || p.doc);
+      const re = dg.length >= 3 ? new RegExp("(^|\\D)0*" + dg + "(\\D|$)") : null;
+      const cita = (c) => c.facs.has(a) || (re && re.test(c.txt));
+      const c = cs.find((c) => !usado.has(c.k) && cita(c) && Math.abs(c.cxp) > 0.5) || cs.find((c) => !usado.has(c.k) && cita(c));
+      if (c) marcar(p, c, "numero", c.cxp);
+    }
+    // 2 · mismo proveedor y mismo valor por pagar, causado entre 10 días antes y 4 meses después
+    for (const p of orden) {
+      if (res.has(p.k) || p.g === "V") continue;
+      const sg = p.tot < 0 ? -1 : 1, at = Math.abs(p.tot), tv = Math.max(tol, at * 0.005);
+      if (at < 0.5) continue;
+      const cs = (porNit.get(p.nit) || []).filter((c) => !usado.has(c.k) && Math.abs(sg * c.cxp - at) <= tv && (sg > 0 || !c.caja))
+        .map((c) => ({ c, dd: dias(p.f, c.f) })).filter((x) => x.dd >= -10 && x.dd <= 120)
+        .sort((x, y) => Math.abs(x.dd) - Math.abs(y.dd));
+      if (cs.length) { marcar(p, cs[0].c, Math.abs(cs[0].dd) > 30 ? "valorLejos" : "valor", cs[0].c.cxp); continue; }
+      // flete cargado al inventario dentro del comprobante de la compra: una guía (columna Factura) por el valor del flete
+      if (!esFlete(p) || sg < 0) continue;
+      let mejor = null;
+      for (const c of porNit.get(p.nit) || []) {
+        const dd = dias(p.f, c.f); if (dd < -10 || dd > 120) continue;
+        for (const [fa, v] of c.invFac) if (!usadoFac.has(c.k + "|" + fa) && Math.abs(v - at) <= tv && (!mejor || Math.abs(dd) < Math.abs(mejor.dd))) mejor = { c, fa, dd, v };
+      }
+      if (mejor) { marcar(p, mejor.c, Math.abs(mejor.dd) > 30 ? "valorLejos" : "inventario", mejor.v); usado.delete(mejor.c.k); usadoFac.add(mejor.c.k + "|" + mejor.fa); }
+    }
+    // 3 · documentos que en realidad son una venta al mismo tercero (mismo valor o su retención, ±5 días)
+    for (const p of orden) {
+      if (res.has(p.k)) continue;
+      const at = Math.abs(p.tot), tv = Math.max(tol, at * 0.005);
+      if (at < 0.5) continue;
+      const c = (porNit.get(p.nit) || []).find((c) => Math.abs(dias(p.f, c.f)) <= 5 && (Math.abs(c.ing - at) <= tv || Math.abs(c.ret - at) <= 1));
+      if (c) res.set(p.k, { num: c.num, fL: c.f, como: "venta", Ltot: r2(Math.abs(c.ing - at) <= tv ? c.ing : c.ret) });
+    }
+    return res;
+  }
+
+  return { extraer, conciliar, validar, indexar, valorCompra, idPeriodo, tipoCorto, NOMBRE_TIPO, nitN, alnum, digitos, mesDe, revalidar };
 })();
 </script>
 <script>
@@ -8566,10 +8651,53 @@ const VerifDian = (() => {
         const R = DN.R;
         cacheDN = { R, X: { ...R, completo: true, pendientes: [...R.filas.filter(PEND_DN), ...R.arrastre], novedades: R.filas.filter((f) => !PEND_DN(f) && f.est !== "anul" && NOVEDAD_DN(f)), anuladas: R.filas.filter((f) => f.est === "anul") } };
       }
-      return cacheDN.X;
+      return conAuxDN(cacheDN.X);
     }
     const g = DN.guardadas.get(id);
-    return g ? { ...g, completo: false, filas: null } : null;
+    return g ? conAuxDN({ ...g, completo: false, filas: null }) : null;
+  }
+
+  /* ---------- pendientes revalidados contra el libro auxiliar del año (Consulta de movimientos)
+     Lo que ya está registrado en el libro del año sale de la lista de pendientes y queda en X.enAux. */
+  const cacheAuxDN = new Map();
+  let esperandoAuxDN = false;
+  function revalAuxDN(X) {
+    const anio = Number((X.hasta || "").slice(0, 4));
+    if (!anio || !unidadesCQ(anio).length) return { estado: "sinLibro", anio };
+    const D = datosAnioCQ(anio);
+    if (!D) {
+      if (!esperandoAuxDN) {
+        esperandoAuxDN = true;
+        Promise.allSettled([...CQ.cargas.values()]).then(() => { esperandoAuxDN = false; if (S.tab === "dian") render(); });
+      }
+      return { estado: "cargando", anio };
+    }
+    const tol = X.tol || DN.cfg.tol;
+    const clave = `${X.id}|${X.cargado || ""}|${D.clave}|${(X.pendientes || []).length}|${tol}`;
+    let r = cacheAuxDN.get(X.id);
+    if (!r || r.clave !== clave) {
+      const res = VerifDian.revalidar(X.pendientes || [], D.rows, { cta: F_CTA, comp: F_COMP, tipo: F_TIPO, f: F_FEC, nit: F_NIT, conc: F_CONC, fac: F_FAC, obs: F_OBSF, obse: F_OBSE, d: F_D, c: F_C }, { tol });
+      r = { clave, res, estado: "listo", anio, desde: D.desde, hasta: D.hasta };
+      cacheAuxDN.set(X.id, r);
+    }
+    return r;
+  }
+  function conAuxDN(X) {
+    if (!X || !(X.pendientes || []).length) return X;
+    const r = revalAuxDN(X);
+    if (r.estado !== "listo") return { ...X, aux: r };
+    const enAux = [], pend = [];
+    for (const p of X.pendientes) { const e = r.res.get(p.k); if (e) enAux.push({ ...p, ...e }); else pend.push(p); }
+    const resumen = clon(X.resumen || {});
+    for (const g of ["V", "C"]) {
+      if (!resumen[g]) continue;
+      const pe = pend.filter((p) => p.g === g && !p.ant);
+      resumen[g].falta = pe.length;
+      resumen[g].faltaTot = r2(pe.reduce((s, p) => s + (p.tot || 0), 0));
+      resumen[g].faltaIva = r2(pe.reduce((s, p) => s + (p.iva || 0), 0));
+    }
+    resumen.arrastre = pend.filter((p) => p.ant).length;
+    return { ...X, pendientes: pend, enAux, resumen, aux: r };
   }
 
   /* ---------- piezas de la vista */
@@ -8641,6 +8769,9 @@ const VerifDian = (() => {
     if (C.anul) H.push(["info", `${n(C.anul)} documentos recibidos se anulan entre sí (factura y nota crédito por el mismo valor, sin registrar): no requieren registro.`, ir("pendientes")]);
     if (X.resumen.libroCompras.n) H.push(["advertencia", `${n(X.resumen.libroCompras.n)} comprobantes con IVA descontable o cuenta por pagar no tienen factura electrónica en la DIAN: IVA de $ ${fmt(X.resumen.libroCompras.iva)}.`, ir("libros")]);
     if (X.resumen.regularizadas) H.push(["ok", `${n(X.resumen.regularizadas)} pendientes de ${esc(textoPer(X.previo))} ya quedaron registrados en este período.`, ir("pendientes")]);
+    const fuera14 = (X.enAux || []).filter((f) => f.flete && !f.en14).length;
+    if (fuera14) H.push(["advertencia", `${n(fuera14)} fletes de transportadoras están registrados fuera del inventario (no en la cuenta 14): deben ir como mayor valor de la mercancía comprada.`, ir("pendientes")]);
+    if ((X.enAux || []).length) H.push(["ok", `${n(X.enAux.length)} documentos que la verificación dejó pendientes sí están en el libro auxiliar de ${esc(String(X.aux.anio))}: ya no cuentan como pendientes.`, ir("pendientes")]);
     if (X.resumen.arrastre) H.push(["advertencia", `${n(X.resumen.arrastre)} pendientes de ${esc(textoPer(X.previo))} siguen sin registrar.`, ir("pendientes")]);
     const nj = (X.pendientes || []).filter(justificada).length;
     if (nj) H.push(["info", `${n(nj)} pendientes están justificados en la revisión (rechazados, de otra empresa o revisados).`, ir("pendientes")]);
@@ -8707,7 +8838,7 @@ const VerifDian = (() => {
     if (gs.length) {
       html += `<section class="panel"><h2>Verificaciones guardadas</h2><p class="sub">${S.db ? "Quedan en línea para todo el equipo." : "Esta vista no guarda en línea: se pierden al cerrar la página."}</p><div class="tabla-env"><table class="lista dn"><thead><tr><th>Período</th><th>Archivos</th><th>Cargado</th><th class="num">Por registrar</th><th class="num">Diferencias</th><th class="num">Sin DIAN</th><th></th></tr></thead><tbody>
         ${gs.map((g) => `<tr><td><b>${esc(textoPer(g.id))}</b></td><td><small>${esc(g.archivos?.dian || "")}</small><small>${esc(g.archivos?.libro || "")}</small></td><td>${esc(fechaC((g.cargado || "").slice(0, 10)))}</td>
-          <td class="num">${fmt((g.pendientes || []).filter((f) => !justificada(f)).length)}</td><td class="num">${fmt((g.resumen?.V?.dif || 0) + (g.resumen?.C?.dif || 0))}</td><td class="num">${fmt((g.resumen?.libroVentas?.n || 0) + (g.resumen?.libroCompras?.n || 0))}</td>
+          <td class="num">${fmt((conAuxDN(g).pendientes || []).filter((f) => !justificada(f)).length)}</td><td class="num">${fmt((g.resumen?.V?.dif || 0) + (g.resumen?.C?.dif || 0))}</td><td class="num">${fmt((g.resumen?.libroVentas?.n || 0) + (g.resumen?.libroCompras?.n || 0))}</td>
           <td class="num">${DN.confirmar === g.id ? `<button class="btn chico peligro" data-dn="borrar" data-id="${esc(g.id)}">Confirmar</button> <button class="btn chico" data-dn="cancelar">No</button>` : `<button class="btn chico" data-dn="ver" data-id="${esc(g.id)}">Ver</button> <button class="btn chico" data-dn="pedir-borrar" data-id="${esc(g.id)}">Eliminar</button>`}</td></tr>`).join("")}
         </tbody></table></div></section>`;
     }
@@ -8729,6 +8860,33 @@ const VerifDian = (() => {
     return `<div class="tabla-env"><table class="lista dn"><thead><tr><th>Fecha</th><th>Tipo</th><th>Número</th><th>Tercero</th><th class="num">Total DIAN</th><th class="num">IVA DIAN</th>
       ${opts.libro ? `<th>Comprobante</th><th class="num">Total libro</th><th class="num">Dif.</th><th class="num">IVA libro</th><th class="num">Dif. IVA</th>` : ""}<th>Situación</th>${opts.marca ? "<th>Revisión</th>" : ""}</tr></thead>
       <tbody>${filas}${totFila}</tbody></table></div>${xs.length > lim ? `<div class="fila" style="justify-content:center;margin-top:10px"><span class="pie" style="margin:0">Se muestran ${fmt(lim)} de ${fmt(xs.length)}.</span><button class="btn chico" data-dn="mas">Ver más</button></div>` : ""}`;
+  }
+
+  /* ---------- Documentos de la DIAN que la verificación dejó pendientes pero están en el libro auxiliar del año */
+  const COMO_AUX = {
+    numero: ["El libro cita el número", "ok"],
+    valor: ["Mismo proveedor y valor, otro número", "ok"],
+    valorLejos: ["Mismo proveedor y valor, causada más de 30 días después", "advertencia"],
+    venta: ["Coincide con una venta al mismo tercero", "info"],
+    inventario: ["Flete en el inventario de la compra (guía y valor)", "ok"],
+  };
+  const fleteChipDN = (f) => !f.flete ? "" : f.en14 ? chipDN(["Flete en inventario (14)", "ok"]) : chipDN([`Flete fuera del inventario${f.cta ? `: cuenta ${f.cta}` : ""}`, "error"]);
+  function auxNotaDN(X) {
+    const a = X.aux;
+    if (!a) return "";
+    if (a.estado === "sinLibro") return `<div class="aviso advertencia"><p>Para descartar los documentos que sí están registrados, cargue el libro auxiliar de ${esc(String(a.anio))} en <button class="btn chico" data-nav="consulta:resumen">Consulta de movimientos</button>. Mientras tanto la lista solo se cruzó con el libro del período verificado.</p></div>`;
+    if (a.estado === "cargando") return `<div class="aviso info"><p><span class="girando" aria-hidden="true"></span>Revisando los pendientes contra el libro auxiliar de ${esc(String(a.anio))}…</p></div>`;
+    const xs = filtrarDN(X.enAux || []).sort((p, q) => (p.f || "").localeCompare(q.f || ""));
+    const nLejos = xs.filter((f) => f.como === "valorLejos").length, nFuera = xs.filter((f) => f.flete && !f.en14).length;
+    let html = `<p class="pie">Pendientes revisados contra el libro auxiliar de ${esc(String(a.anio))} (del ${esc(fechaC(a.desde))} al ${esc(fechaC(a.hasta))}, Consulta de movimientos). Solo quedan en la lista los que no aparecen registrados.</p>`;
+    if (!xs.length) return html;
+    html += `<details class="conf"><summary>Ya registrados en el libro auxiliar de ${esc(String(a.anio))} (${fmt(xs.length)})${nLejos ? ` · ${fmt(nLejos)} para confirmar` : ""}${nFuera ? ` · ${fmt(nFuera)} fletes fuera del inventario` : ""}</summary><div>
+      <p class="sub">La verificación los dejó pendientes porque el comprobante no cita el número de la DIAN o se registró en otro período. Se encontraron por el número citado en el libro, o por el mismo proveedor y el mismo valor por pagar. Los fletes (transportadoras) deben causarse con la factura de compra de la mercancía, como mayor valor del inventario: se buscan por el NIT de la transportadora y el valor de la guía en la cuenta 14, y se marcan los que quedaron en otra cuenta.</p>
+      <div class="tabla-env"><table class="lista dn"><thead><tr><th>Fecha</th><th>Documento</th><th>Tercero</th><th class="num">Total DIAN</th><th>Comprobante en el libro</th><th class="num">Valor libro</th><th>Cómo se encontró</th></tr></thead><tbody>
+      ${xs.map((f) => `<tr><td>${esc(fechaC(f.f))}</td><td><b>${esc(f.doc)}</b><small>${esc(tipoTxt(f))}</small></td><td class="nom">${esc(f.nom)}<small>NIT ${esc(f.nit)}</small></td>${montoDN(f.tot)}
+        <td><b>${esc(f.num)}</b><small>${esc(fechaC(f.fL))}</small></td>${montoDN(f.Ltot)}<td>${chipDN(COMO_AUX[f.como] || [f.como, "gris"])} ${fleteChipDN(f)}</td></tr>`).join("")}
+      <tr class="dn-tot"><td colspan="3">Total (${fmt(xs.length)})</td>${montoDN(xs.reduce((s, f) => s + (f.tot || 0), 0))}<td colspan="3"></td></tr></tbody></table></div></div></details>`;
+    return html;
   }
 
   /* ---------- Pendientes por mes: qué hay que hacer, documento por documento */
@@ -8806,6 +8964,7 @@ const VerifDian = (() => {
           <td>${t.k ? `<select class="dn-marca" data-dnmarca="${esc(t.k)}" aria-label="Revisión">${MARCAS_DN.map(([v, tx]) => `<option value="${v}" ${(DN.marcas[t.k]?.e || "") === v ? "selected" : ""}>${esc(tx)}</option>`).join("")}</select>` : `<small>Se corrige en el software</small>`}</td></tr>`).join("")}
         </tbody></table></div>${xs.length > lim ? `<div class="fila" style="justify-content:center;margin-top:10px"><span class="pie" style="margin:0">Se muestran ${fmt(lim)} de ${fmt(xs.length)}.</span><button class="btn chico" data-dn="mas">Ver más</button></div>` : ""}</section>`;
     });
+    html += auxNotaDN(X);
     const reg = filtrarDN(X.regularizadas || []);
     if (reg.length) html += `<details class="conf"><summary>Pendientes anteriores que ya se registraron (${fmt(reg.length)})</summary><div><p class="sub">Venían pendientes de ${esc(textoPer(X.previo))} y aparecen en el libro de este período.</p>${tablaDocsDN(reg, { libro: true, estado: true, total: true })}</div></details>`;
     const an = filtrarDN(X.anuladas || []);
