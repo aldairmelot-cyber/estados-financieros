@@ -10018,7 +10018,8 @@ La fecha de autorización para publicar y quién la autoriza se revelan en las n
     if (r.capitalSuscrito && Math.abs(capLibros - r.capitalSuscrito) > 1) {
       const reforma = [...EST.docs.values()].some((d) => d.tipo === "reforma" || d.tipo === "certificado");
       out.push([reforma ? "info" : "error", `Capital: los estatutos fijan un capital suscrito de ${$f(r.capitalSuscrito)} (${fmt(r.acciones || 0)} acciones de ${$f(r.valorNominal || 0)}), y la contabilidad registra ${$f(capLibros)} en la 3105. ${reforma ? "Verifique que la reforma o el certificado cargado soporte ese valor." : "Debe existir una reforma estatutaria de aumento de capital inscrita en la Cámara de Comercio: cárguela aquí junto con el certificado de existencia y representación legal vigente."}`]);
-    } else if (r.capitalSuscrito) out.push(["ok", `El capital suscrito de la contabilidad (${$f(capLibros)}) coincide con los estatutos.`]);
+    } else if (r.capitalSuscrito) out.push(["ok", `El capital suscrito de la contabilidad (${$f(capLibros)}) coincide con los estatutos y sus reformas inscritas.`]);
+    if (r.acciones && totalAcciones() !== r.acciones) out.push(["error", `Acciones: según los estatutos y sus reformas hay ${fmt(r.acciones)} acciones en circulación, pero la configuración de la app (Datos → Configuración → accionistas) tiene ${fmt(totalAcciones())}. Corríjalo: ese dato sale en la nota de accionistas de los estados financieros.`]);
     // Reserva legal
     if (r.reservaLegalPct) {
       const reserva = -v("3305"), acum = -v("37"), tope = (r.reservaLegalTope || 50) / 100 * capLibros;
