@@ -10006,6 +10006,7 @@ La fecha de autorización para publicar y quién la autoriza se revelan en las n
   const smmlvDe = (anio) => SMMLV[anio] || SMMLV[Math.max(...Object.keys(SMMLV).map(Number).filter((a) => a <= anio))] || SMMLV[2026];
   const EST = { docs: new Map(), ocupado: "", error: "" };
   const TAM_PARTE_DOC = 700000;
+  const TIPO_DOC = { estatutos: "Estatutos", reforma: "Reforma estatutaria", certificado: "Cámara de Comercio", acta: "Acta de asamblea", otro: "Otro" };
   function revisarEstatutos(D) {
     const E = EST.docs.get("estatutos");
     if (!E || !E.reglas) return [];
@@ -10060,7 +10061,7 @@ La fecha de autorización para publicar y quién la autoriza se revelan en las n
     html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start"><div><h2>Estatutos y documentos de la sociedad</h2>
       <p class="sub" style="margin:0">Acta de constitución, estatutos, reformas, certificado de la Cámara de Comercio y actas. Quedan en línea para el equipo.</p></div>
       <label class="btn primario" style="cursor:pointer">Cargar PDF<input type="file" accept="application/pdf" id="est-archivo" hidden></label></div>
-      <div class="pol-meta" style="margin-top:8px"><label>Tipo del próximo PDF <select id="est-tipo">${[["estatutos", "Estatutos / acta de constitución"], ["reforma", "Reforma estatutaria"], ["certificado", "Certificado de existencia y representación"], ["acta", "Acta de asamblea"], ["otro", "Otro documento"]].map(([k, t]) => `<option value="${k}" ${EST.tipo === k ? "selected" : ""}>${t}</option>`).join("")}</select></label></div></section>`;
+      <div class="pol-meta" style="margin-top:8px">${(() => { const sp = [...EST.docs.values()].filter((d) => !d.pdf && d.id !== "estatutos"); return sp.length ? `<label>Asociar el PDF a <select id="est-asociar"><option value="">Documento nuevo</option>${sp.map((d) => `<option value="${esc(d.id)}" ${EST.asociar === d.id ? "selected" : ""}>${esc((d.titulo || d.id).slice(0, 70))}</option>`).join("")}</select></label>` : ""; })()}<label>Tipo del próximo PDF <select id="est-tipo">${[["estatutos", "Estatutos / acta de constitución"], ["reforma", "Reforma estatutaria"], ["certificado", "Certificado de existencia y representación"], ["acta", "Acta de asamblea"], ["otro", "Otro documento"]].map(([k, t]) => `<option value="${k}" ${EST.tipo === k ? "selected" : ""}>${t}</option>`).join("")}</select></label></div></section>`;
     if (!E) return html + `<section class="panel"><p class="vacio">Todavía no hay estatutos cargados.</p></section>`;
     const d = E.datos || {};
     html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:baseline"><h2>${esc(E.titulo || "Estatutos")}</h2>${E.pdf ? `<button class="btn" data-est="ver" data-id="estatutos">Ver PDF original</button>` : `<span class="chip advertencia">Falta el PDF original</span>`}</div>
@@ -10076,7 +10077,7 @@ La fecha de autorización para publicar y quién la autoriza se revelan en las n
       ${E.clausulas.map((c) => `<tr><td>${esc(c.art)}</td><td><b>${esc(c.titulo)}</b></td><td style="white-space:normal">${esc(c.texto)}</td></tr>`).join("")}</tbody></table></section>`;
     if (E.texto) html += `<details class="conf"><summary>Texto completo de los estatutos (transcripción del PDF)</summary><div><pre class="est-texto">${esc(E.texto)}</pre></div></details>`;
     html += `<section class="panel"><h2>Otros documentos</h2>${otros.length ? `<table class="lista"><thead><tr><th>Documento</th><th>Tipo</th><th>Cargado</th><th></th></tr></thead><tbody>
-      ${otros.map((o) => `<tr><td>${esc(o.titulo || o.nombre)}</td><td>${esc(o.tipo)}</td><td>${esc((o.cargado || "").slice(0, 10))}</td><td class="num"><button class="btn chico" data-est="ver" data-id="${esc(o.id)}">Ver</button> ${EST.confirmar === o.id ? `<button class="btn chico peligro" data-est="borrar" data-id="${esc(o.id)}">Confirmar</button> <button class="btn chico" data-est="cancelar">No</button>` : `<button class="btn chico" data-est="pborrar" data-id="${esc(o.id)}">Eliminar</button>`}</td></tr>`).join("")}</tbody></table>` : `<p class="vacio">Cargue aquí las reformas estatutarias, el certificado de existencia y representación legal y las actas de asamblea (aprobación de estados financieros, distribución de utilidades, nombramientos, autorizaciones de créditos).</p>`}</section>`;
+      ${otros.map((o) => `<tr><td style="white-space:normal">${esc(o.titulo || o.nombre)}${o.detalle ? `<small style="display:block;white-space:normal">${esc(o.detalle)}</small>` : ""}</td><td>${esc(TIPO_DOC[o.tipo] || o.tipo)}</td><td>${esc(o.fechaDoc || (o.cargado || "").slice(0, 10))}</td><td class="num">${o.pdf ? `<button class="btn chico" data-est="ver" data-id="${esc(o.id)}">Ver PDF</button>` : `<span class="chip advertencia">Sin PDF</span>`} ${EST.confirmar === o.id ? `<button class="btn chico peligro" data-est="borrar" data-id="${esc(o.id)}">Confirmar</button> <button class="btn chico" data-est="cancelar">No</button>` : `<button class="btn chico" data-est="pborrar" data-id="${esc(o.id)}">Eliminar</button>`}</td></tr>`).join("")}</tbody></table>` : `<p class="vacio">Cargue aquí las reformas estatutarias, el certificado de existencia y representación legal y las actas de asamblea (aprobación de estados financieros, distribución de utilidades, nombramientos, autorizaciones de créditos).</p>`}</section>`;
     return html;
   }
   async function leerPDFDoc(id) {
@@ -10094,19 +10095,21 @@ La fecha de autorización para publicar y quién la autoriza se revelan en las n
     const u = new Uint8Array(await file.arrayBuffer());
     let bin = ""; for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
     const b64 = btoa(bin), lote = Date.now().toString(36), partes = Math.ceil(b64.length / TAM_PARTE_DOC);
-    const id = tipo === "estatutos" ? "estatutos" : `${tipo}_${lote}`;
+    const sinPdf = [...EST.docs.values()].find((d) => d.tipo === tipo && !d.pdf && d.id !== "estatutos" && EST.asociar === d.id);
+    const id = tipo === "estatutos" ? "estatutos" : sinPdf ? sinPdf.id : `${tipo}_${lote}`;
     const prev = EST.docs.get(id);
     for (let i = 0; i < partes; i++) {
       EST.ocupado = `Guardando ${file.name} (parte ${i + 1} de ${partes})…`; render();
       await S.db.doc(`documentosPartes/${id}_${lote}_${i}`).set({ id, lote, i, d: b64.slice(i * TAM_PARTE_DOC, (i + 1) * TAM_PARTE_DOC) });
     }
     const pdf = { nombre: file.name, bytes: file.size, lote, partes };
-    if (tipo === "estatutos" && prev) await S.db.doc("documentos/estatutos").set({ pdf, cargado: prev.cargado || new Date().toISOString() }, { merge: true });
+    if ((tipo === "estatutos" || sinPdf) && prev) await S.db.doc(`documentos/${id}`).set({ pdf, cargado: prev.cargado || new Date().toISOString() }, { merge: true });
     else await S.db.doc(`documentos/${id}`).set({ id, tipo, titulo: file.name.replace(/\.pdf$/i, ""), nombre: file.name, pdf, cargado: new Date().toISOString() });
     if (prev && prev.pdf && prev.pdf.lote !== lote) for (let i = 0; i < prev.pdf.partes; i++) { try { await S.db.doc(`documentosPartes/${id}_${prev.pdf.lote}_${i}`).delete(); } catch { /* ya no está */ } }
   }
   document.addEventListener("change", async (ev) => {
     if (ev.target.id === "est-tipo") { EST.tipo = ev.target.value; return; }
+    if (ev.target.id === "est-asociar") { EST.asociar = ev.target.value; const d = EST.docs.get(EST.asociar); if (d) { EST.tipo = d.tipo; render(); } return; }
     if (ev.target.id !== "est-archivo" || !ev.target.files?.[0]) return;
     const f = ev.target.files[0]; ev.target.value = ""; EST.error = "";
     try { await cargarPDFDoc(f, EST.tipo || $("#est-tipo")?.value || "estatutos"); toast(`${f.name} guardado.`); }
