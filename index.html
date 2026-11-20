@@ -10042,9 +10042,13 @@ La fecha de autorización para publicar y quién la autoriza se revelan en las n
       out.push([pn < capLibros / 2 ? "error" : "ok", `Causal de disolución por pérdidas (art. ${r.artDisolucion || "44"}): el patrimonio neto (${$f(pn)}) ${pn < capLibros / 2 ? "es inferior" : "supera holgadamente"} al 50 % del capital suscrito (${$f(capLibros / 2)}).`]);
     }
     // Revisor fiscal (Ley 43 de 1990, art. 13, par. 2)
-    const activos = v("1"), ingresos = -v("41");
-    const obligado = activos > 5000 * sm || ingresos > 3000 * sm;
-    out.push(["info", `Revisor fiscal: los estatutos no lo mencionan, pero la ley lo exige a las sociedades con activos brutos superiores a 5.000 SMMLV o ingresos brutos superiores a 3.000 SMMLV del año anterior (Ley 43 de 1990, art. 13, par. 2). ${obligado ? `Con los ingresos acumulados de ${ctx.anio} (${$f(ingresos)}) la Compañía supera ese umbral: el nombramiento debe constar en acta de asamblea e inscribirse en la Cámara de Comercio.` : "Al corte no se supera el umbral; se evalúa con las cifras de cierre del año anterior."}`]);
+    // Se mide con el año anterior completo; si no está cargado, con los ingresos del año proyectados a doce meses.
+    const dicAnt = S.hist.get(`${ctx.anio - 1}-12`);
+    const base = dicAnt
+      ? { txt: `del cierre de ${ctx.anio - 1}`, ing: -Motor.valor(dicAnt, "41", "ns"), act: Motor.valor(dicAnt, "1", "ns"), sm: smmlvDe(ctx.anio - 1) }
+      : { txt: `de ${ctx.anio} proyectados a doce meses`, ing: -v("41") * 12 / ctx.mes, act: v("1"), sm };
+    const obligado = base.act > 5000 * base.sm || base.ing > 3000 * base.sm;
+    out.push([obligado ? "info" : "ok", `Revisor fiscal: los estatutos no lo mencionan, pero la ley lo exige a las sociedades con activos brutos superiores a 5.000 SMMLV o ingresos brutos superiores a 3.000 SMMLV del año anterior (Ley 43 de 1990, art. 13, par. 2). Con los ingresos ${base.txt} (${$f(base.ing)}, frente a ${$f(3000 * base.sm)}) ${obligado ? "la Compañía está obligada a tenerlo: el nombramiento debe constar en acta de asamblea e inscribirse en la Cámara de Comercio." : "no se supera el umbral."}`]);
     for (const o of E.observaciones || []) out.push(["advertencia", o]);
     return out;
   }
