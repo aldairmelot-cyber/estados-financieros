@@ -429,6 +429,18 @@ table.cq small.neg, .lista small.neg { color: var(--error); display: block; }
 .girando { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: dn-giro .8s linear infinite; margin-right: 8px; vertical-align: -1px; }
 @keyframes dn-giro { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .girando { animation: none; } }
+.pol-texto p { margin: 0 0 9px; line-height: 1.55; }
+.pol-texto ul { margin: 0 0 10px; padding-left: 22px; line-height: 1.5; }
+.pol-texto li { margin-bottom: 4px; }
+.pol-ta { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; line-height: 1.5; padding: 10px; border: 1px solid var(--linea); border-radius: 8px; }
+.pol-indice { columns: 2; column-gap: 32px; margin: 0; padding-left: 22px; line-height: 1.9; }
+.pol-rev { display: grid; gap: 8px; }
+.pol-hall { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; }
+.pol-hall p { margin: 0; line-height: 1.45; }
+.pol-hall a { white-space: nowrap; font-size: 13px; }
+.pol-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 10px; align-items: end; }
+.pol-meta label { display: grid; gap: 4px; font-size: 13px; }
+@media (max-width: 700px) { .pol-indice { columns: 1; } .pol-hall { grid-template-columns: 1fr; } }
 </style>
 
 <div class="app">
@@ -4294,9 +4306,10 @@ const VerifDian = (() => {
     db: null, dbListo: false, cargando: true, confirmar: null, sedeVista: "mes", borrador: null, sucio: false,
   };
   const TABS = [["inicio", "Panel"], ["cargar", "Cargar archivo"], ["revision", "Revisión"], ["esf", "Situación financiera"], ["eri", "Resultados"],
-    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["dian", "Verificación DIAN"], ["consulta", "Consulta del libro auxiliar"], ["anual", "Años cerrados"], ["renta", "Declaraciones de renta"], ["req", "Requerimientos DIAN"], ["firmas", "Firmas"], ["config", "Configuración"]];
+    ["sede", "Resultados por sede"], ["ecp", "Patrimonio"], ["efe", "Flujos de efectivo"], ["ind", "Indicadores"], ["terceros", "Cartera y proveedores"], ["notas", "Notas"], ["impuestos", "Impuestos"], ["dictamen", "Dictamen"], ["exportar", "Exportar"], ["bancos", "Conciliaciones bancarias"], ["prov", "Proveedores por pagar"], ["dian", "Verificación DIAN"], ["consulta", "Consulta del libro auxiliar"], ["anual", "Años cerrados"], ["renta", "Declaraciones de renta"], ["req", "Requerimientos DIAN"], ["firmas", "Firmas"], ["politicas", "Políticas contables"], ["config", "Configuración"]];
 
   const ICO = {
+    politicas: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h6"/>',
     inicio: '<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/>',
     informes: '<path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
     gestion: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -4314,6 +4327,7 @@ const VerifDian = (() => {
   const NAV = [
     { g: null, items: [["inicio", "Panel general", "inicio"]] },
     { g: "Informes financieros", ico: "informes", items: [["esf", "Situación financiera"], ["eri", "Resultados integrales"], ["ecp", "Cambios en el patrimonio"], ["efe", "Flujos de efectivo"], ["notas", "Notas a los estados"], ["ind", "Indicadores financieros"], ["dictamen", "Dictamen del revisor fiscal"], ["exportar", "Paquete completo (PDF/Excel)"]] },
+    { g: "Políticas contables", ico: "politicas", items: [["politicas", "Políticas contables"]] },
     { g: "Años cerrados (2023 y 2024)", ico: "anual", items: [["anual:cargar", "Cargar balance anual por tercero"], ["anual:esf", "Situación financiera"], ["anual:eri", "Resultados integrales"], ["anual:ecp", "Cambios en el patrimonio"], ["anual:efe", "Flujos de efectivo"], ["anual:ind", "Indicadores"], ["anual:notas", "Notas"], ["anual:terceros", "Saldos por tercero (DIAN)"]] },
     { g: "Consulta de movimientos", ico: "consulta", items: [["consulta:resumen", "Libros auxiliares cargados"], ["consulta:movs", "Movimientos por cuenta"], ["consulta:comp", "Comprobantes"], ["consulta:cuadre", "Cuadre con el balance"]] },
     { g: "Gestión", ico: "gestion", items: [["sede:lineal", "Resultados por sede mes a mes"], ["sede:mes", "Resultados por sede · mes"], ["sede:acum", "Resultados por sede · año"]] },
@@ -6818,7 +6832,7 @@ const VerifDian = (() => {
     if (S.cargando) { v.innerHTML = '<section class="panel"><p class="vacio">Cargando el histórico…</p></section>'; return; }
     let D = null;
     try { D = calcular(); } catch (err) { console.error(err); }
-    const vistas = { firmas: () => vistaFirmas(), dian: () => vistaDian(), consulta: () => vistaConsulta(), anual: () => vistaAnual(), renta: () => vistaRenta(), req: () => vistaReq(), prov: () => vistaProveedores(), bancos: () => vistaBancos(), inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
+    const vistas = { firmas: () => vistaFirmas(), dian: () => vistaDian(), consulta: () => vistaConsulta(), anual: () => vistaAnual(), renta: () => vistaRenta(), req: () => vistaReq(), prov: () => vistaProveedores(), bancos: () => vistaBancos(), politicas: vistaPoliticas, inicio: vistaInicio, cargar: vistaCargar, revision: vistaRevision, esf: vistaESF, eri: vistaERI, sede: vistaSede, ecp: vistaECP, efe: vistaEFE, ind: vistaInd, terceros: vistaTerceros, notas: vistaNotas, impuestos: vistaImpuestos, dictamen: vistaDictamen, exportar: vistaExportar, config: vistaConfig };
     try { v.innerHTML = (vistas[S.tab] || vistaInicio)(D); } catch (err) {
       console.error(err);
       v.innerHTML = `<div class="aviso error"><p>No se pudo mostrar esta sección: ${esc(err.message)}</p></div>`;
@@ -9495,6 +9509,486 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     p.catch((err) => { CQ.error = err.message; }).finally(() => { CQ.cargas.delete(k); CQ.comb = null; if (S.tab === "consulta") render(); });
     return p;
   }
+  /* =====================================================================
+     POLÍTICAS CONTABLES — texto base (NIIF para las Pymes, Grupo 2)
+     Cada sección: id, titulo, seccion (de la NIIF para las Pymes), cuentas (prefijos PUC
+     cuyo saldo se muestra al corte) y texto. Formato del texto: párrafos separados por una
+     línea en blanco, viñetas con "- " y negrilla con **…**. Lo que el usuario edite en la
+     app se guarda en config/politicas y reemplaza el texto de la sección.
+     ===================================================================== */
+  const POLITICAS_BASE = [
+    {
+      id: "generalidades", titulo: "Información general y objetivo", seccion: "Sección 1 y 3", cuentas: [],
+      texto: `**DISTRIBUCIONES CLÍNICAS DE LA COSTA S.A.S.** (en adelante, «la Compañía» o «Districlínicas»), NIT 900.619.755-5, es una sociedad por acciones simplificada con domicilio en Santa Marta (Magdalena). Su actividad principal es la comercialización al por mayor y al por menor de productos farmacéuticos, medicinales, dispositivos médicos, productos de aseo y artículos de tocador, a través de sus puntos de venta (PV1 SM, PV2 CRT y PV3 SM) y del canal institucional, cuyos clientes principales son instituciones prestadoras de servicios de salud (IPS) y empresas sociales del Estado (ESE).
+
+Este documento reúne los principios, bases, convenciones, reglas y procedimientos que la Compañía adopta para preparar y presentar sus estados financieros. Su objetivo es que la información financiera sea comprensible, relevante, fiable y comparable, y que cada hecho económico se reconozca, mida, presente y revele siempre de la misma manera.
+
+Las políticas aplican a todas las áreas que generan información contable (compras, bodega, puntos de venta, cartera, tesorería, nómina y contabilidad) y a los registros que se llevan en el software contable (MantisWeb). Cuando una transacción no esté cubierta por estas políticas, la administración aplicará su juicio siguiendo la jerarquía de la Sección 10 de la NIIF para las Pymes.`,
+    },
+    {
+      id: "marco", titulo: "Marco normativo", seccion: "Ley 1314 de 2009", cuentas: [],
+      texto: `La Compañía pertenece al **Grupo 2** de preparadores de información financiera y aplica la **NIIF para las Pymes**, en los términos de:
+
+- **Ley 1314 de 2009**, que regula los principios y normas de contabilidad e información financiera aceptados en Colombia.
+- **Decreto Único Reglamentario 2420 de 2015**, Anexo 2 (marco técnico normativo para el Grupo 2), en la versión incorporada por el Decreto 2483 de 2018, y sus modificaciones.
+- **Decreto 0701 del 7 de julio de 2026**, que modificó la Sección 29 (Impuesto a las Ganancias) para incorporar la excepción relativa a las reglas del modelo del Segundo Pilar. Rige desde el 9 de julio de 2026.
+- **Código de Comercio** (libros, reservas, distribución de utilidades), **Ley 222 de 1995** (estados financieros de propósito general, certificación del artículo 37 y dictamen del revisor fiscal), **Ley 1258 de 2008** (sociedades por acciones simplificadas) y **Ley 43 de 1990** (ejercicio de la contaduría pública).
+
+**Tercera edición de la NIIF para las Pymes.** El IASB la emitió en febrero de 2025. En Colombia todavía no es aplicable: el Consejo Técnico de la Contaduría Pública (CTCP) la sometió a discusión pública en 2026 y propuso que rija desde el 1 de enero de 2028, sin aplicación anticipada. La Compañía seguirá aplicando la versión vigente del Anexo 2 hasta que un decreto la incorpore, y actualizará estas políticas en ese momento (principalmente ingresos, que adoptan el modelo de cinco pasos, e instrumentos financieros).
+
+**Normas tributarias.** La contabilidad bajo NIIF es la base para determinar el impuesto sobre la renta (artículo 21-1 del Estatuto Tributario), con las excepciones que la ley tributaria establece. Las diferencias entre la base contable y la fiscal se controlan en la conciliación fiscal (artículo 772-1 del Estatuto Tributario y formato 2516 de la DIAN, cuando aplique) y dan lugar al impuesto diferido. Los criterios fiscales **no** se usan para reconocer o medir partidas en la contabilidad, salvo cuando coincidan con la NIIF.
+
+**Normas del sector.** Como establecimiento farmacéutico, la Compañía está sujeta al Decreto 780 de 2016 (Único Reglamentario del Sector Salud, que compila el Decreto 2200 de 2005 sobre servicio farmacéutico), a la Resolución 1403 de 2007 (Manual de condiciones esenciales y procedimientos del servicio farmacéutico), a la Resolución 1478 de 2006 (medicamentos de control especial, cuando se manejen), a la vigilancia del INVIMA y de las secretarías de salud, y a la regulación de precios de medicamentos de la Comisión Nacional de Precios de Medicamentos y Dispositivos Médicos. Estas normas afectan sobre todo el manejo y la medición de los inventarios (vencimientos, cuarentena, destrucción) y los precios de venta.`,
+    },
+    {
+      id: "bases", titulo: "Bases de preparación", seccion: "Secciones 2 y 3", cuentas: [],
+      texto: `- **Negocio en marcha.** Los estados financieros se preparan suponiendo que la Compañía continuará operando. Al cierre de cada año la administración evalúa si existen incertidumbres materiales (por ejemplo, por la concentración de cartera con entidades del sector salud) y, si las hay, las revela.
+- **Base de acumulación (devengo).** Los hechos económicos se reconocen cuando ocurren, no cuando se recibe o paga el efectivo.
+- **Moneda funcional y de presentación:** peso colombiano (COP). Las cifras se presentan en pesos, sin decimales.
+- **Período contable:** del 1 de enero al 31 de diciembre. Se preparan además estados financieros intermedios mensuales para la gestión, con el mismo marco.
+- **Bases de medición:** costo histórico, salvo los terrenos y edificaciones, que se miden por el modelo de revaluación (ver política de propiedades, planta y equipo), y los instrumentos que la NIIF exige a costo amortizado.
+- **Comparativos.** El estado de situación financiera se compara con el 31 de diciembre del año anterior; el estado de resultados, con el mismo período del año anterior.
+- **Materialidad.** Una partida u omisión es material si, por sí sola o junto con otras, puede influir en las decisiones de los usuarios. Como referencia cuantitativa, la Compañía considera material un importe igual o superior al **5 % del resultado antes de impuestos** o al **0,5 % de los ingresos de actividades ordinarias** del año, lo que sea menor, sin perjuicio de que una partida sea material por su naturaleza (por ejemplo, sanciones o transacciones con partes relacionadas).
+- **Compensación.** No se compensan activos con pasivos ni ingresos con gastos, salvo que una norma lo exija o permita (por ejemplo, saldos a favor y pasivos del mismo impuesto con la misma autoridad).`,
+    },
+    {
+      id: "presentacion", titulo: "Presentación de los estados financieros", seccion: "Secciones 3 a 8", cuentas: [],
+      texto: `El juego completo de estados financieros comprende:
+
+- **Estado de situación financiera**, que separa activos y pasivos en corrientes y no corrientes. Es corriente lo que se espera realizar o liquidar dentro de los doce meses siguientes al cierre o dentro del ciclo normal de operación.
+- **Estado de resultado integral**, en un solo estado, con los gastos clasificados por su función (costo de ventas, administración, ventas y no operacionales). El otro resultado integral incluye el superávit por revaluación de terrenos y edificaciones.
+- **Estado de cambios en el patrimonio.**
+- **Estado de flujos de efectivo**, por el **método indirecto**.
+- **Notas**, con el resumen de estas políticas, los juicios y estimaciones significativos y el detalle de las partidas.
+
+Los estados financieros de fin de año se acompañan de la **certificación** del representante legal y del contador (artículo 37 de la Ley 222 de 1995) y del **dictamen del revisor fiscal**, y se someten a aprobación de la asamblea de accionistas. Los resultados por punto de venta (centros de costo PV1, PV2, PV3 y administración central) son información de gestión y no forman parte de los estados financieros de propósito general.`,
+    },
+    {
+      id: "cambios", titulo: "Políticas, estimaciones y errores", seccion: "Sección 10", cuentas: [],
+      texto: `- **Cambios de política contable.** Solo se cambia una política si lo exige la norma o si el cambio da información más fiable y relevante. Se aplica de forma **retroactiva**, reexpresando los comparativos, salvo que sea impracticable.
+- **Cambios en estimaciones** (vidas útiles, deterioro de cartera e inventarios, provisiones): se reconocen de forma **prospectiva**, en el período del cambio y en los siguientes.
+- **Errores de períodos anteriores.** Los errores materiales se corrigen de forma retroactiva, reexpresando los comparativos o, si ocurrieron antes, los saldos iniciales del período más antiguo presentado. Los errores no materiales se corrigen en el período en que se detectan.
+- Toda corrección o reclasificación relevante se documenta con un comprobante que explique su origen y se revela en las notas cuando sea material.`,
+    },
+    {
+      id: "efectivo", titulo: "Efectivo y equivalentes al efectivo", seccion: "Secciones 7 y 11", cuentas: ["11"],
+      texto: `**Reconocimiento.** Comprende la caja general de cada punto de venta, las cajas menores, las cuentas corrientes y de ahorros, y las inversiones de alta liquidez con vencimiento de tres meses o menos desde su adquisición, fácilmente convertibles en efectivo y con riesgo insignificante de cambios en su valor.
+
+**Medición.** Por su valor nominal.
+
+**Procedimientos.**
+- El efectivo recaudado en cada punto de venta se consigna a más tardar el día hábil siguiente. Los faltantes de caja se reconocen como cuenta por cobrar al responsable (1365) cuando proceda su cobro, o como gasto.
+- Las cajas menores funcionan como fondo fijo y se legalizan por lo menos una vez al mes, y siempre al cierre de cada mes, con soportes válidos (factura electrónica o documento soporte).
+- Todas las cuentas bancarias se concilian mensualmente. Las partidas conciliatorias de más de 90 días se investigan y se ajustan.
+- Los recaudos con tarjetas, datáfonos y pasarelas de pago (Bold y similares) que el operador todavía no ha abonado al cierre se presentan como cuenta por cobrar al operador, no como efectivo. Las comisiones se reconocen como gasto financiero.
+- El efectivo con restricciones (embargos, garantías) se revela y, si la restricción supera doce meses, se presenta como no corriente.`,
+    },
+    {
+      id: "cxc", titulo: "Cuentas comerciales por cobrar y otras cuentas por cobrar", seccion: "Sección 11", cuentas: ["1305", "1310", "1345", "1365", "1380", "1390", "1399"],
+      texto: `**Reconocimiento.** Las cuentas por cobrar a clientes se reconocen cuando se transfiere el control de la mercancía y se expide la factura electrónica de venta, por el precio de la transacción. Incluyen la cartera de IPS y ESE, de clientes particulares y la financiada por terceros (Sistecrédito).
+
+**Medición inicial y posterior.** Las ventas se otorgan con plazos normales del sector (hasta 90 días para el canal institucional), sin intereses. Por eso se miden al **importe no descontado** de la factura. Si una cuenta se financia por encima de los plazos normales sin intereses, o se pacta un acuerdo de pago a más de doce meses, se mide a **costo amortizado** con el método del interés efectivo, descontando los flujos a una tasa de mercado para un crédito similar.
+
+**Deterioro.** Al cierre de cada trimestre, y siempre al cierre del año, cartera evalúa si hay evidencia objetiva de deterioro. Son indicios: mora superior a 360 días; cobro por vía jurídica; que el deudor esté en liquidación, intervención o toma de posesión por la Superintendencia Nacional de Salud; acuerdos de reestructuración (Ley 1116 de 2006); glosas no conciliadas o incumplimiento de acuerdos de pago.
+- Los deudores significativos (todas las IPS y ESE, y cualquier deudor con saldo superior a 100 SMMLV) se evalúan **individualmente**, estimando los flujos que se espera recuperar y el tiempo de recuperación, con apoyo del concepto del abogado para la cartera en cobro jurídico.
+- El resto se evalúa **colectivamente** por edades de vencimiento, con porcentajes basados en la experiencia de recaudo de la Compañía, que se revisan cada año.
+- El deterioro se reconoce como gasto (5199) contra la cuenta correctora **1399 (crédito)**. Si en un período posterior disminuye, la reversión se reconoce en resultados (4250 recuperaciones), sin superar el costo amortizado que se habría tenido sin deterioro.
+
+**Presentación.** La cartera en cobro jurídico o de difícil cobro se reclasifica a **1390 Deudas de difícil cobro** y se presenta como activo **no corriente** cuando su recuperación se espera en más de doce meses. La cuenta 1399 se usa exclusivamente para el deterioro acumulado (saldo crédito).
+
+**Baja (castigo).** Una cuenta se da de baja cuando se agotan las gestiones de cobro y se considera incobrable, con aprobación de la gerencia y soporte del abogado, o cuando prescribe. El castigo se registra contra el deterioro acumulado.
+
+**Tratamiento fiscal.** El deterioro deducible en renta se calcula por el método individual o general del artículo 145 del Estatuto Tributario y los artículos 1.2.1.18.19 a 1.2.1.18.22 del Decreto 1625 de 2016, y el castigo por el artículo 146. Las diferencias con el deterioro contable se registran en la conciliación fiscal y en el impuesto diferido.
+
+**Otras cuentas por cobrar.** Los anticipos a proveedores, contratistas y trabajadores (1330) se reconocen por el valor entregado y se legalizan cuando se recibe el bien o servicio; los que no se legalicen en 90 días se analizan. Las cuentas por cobrar a trabajadores (1365) se miden por el valor por cobrar y se descuentan por nómina según lo pactado. Los intereses de mora a cargo de los clientes solo se reconocen cuando su cobro es probable, en la práctica cuando se recaudan.`,
+    },
+    {
+      id: "impuestos_favor", titulo: "Anticipos de impuestos y saldos a favor", seccion: "Secciones 11 y 29", cuentas: ["1355"],
+      texto: `Las retenciones en la fuente que practican los clientes (renta, IVA e ICA), las autorretenciones y los anticipos del impuesto de renta se reconocen como activo (1355) por su valor nominal, con base en los certificados y en la información electrónica de la DIAN, y se aplican en la declaración del impuesto correspondiente.
+
+Al cierre del año, las retenciones y anticipos de renta se presentan **netos** del impuesto de renta por pagar, porque existe el derecho legal de compensarlos con la misma autoridad. Los saldos a favor que resulten se presentan como activo hasta su devolución o compensación.
+
+Las estampillas que descuentan las entidades públicas al pagar (estampillas departamentales y municipales) **no** son anticipos de impuestos de la Compañía: se reconocen como gasto (519550) en el momento en que se practica el descuento.`,
+    },
+    {
+      id: "inventarios", titulo: "Inventarios", seccion: "Sección 13", cuentas: ["14"],
+      texto: `**Reconocimiento.** Son inventarios las mercancías no fabricadas por la Compañía que se mantienen para la venta: medicamentos, dispositivos médicos, productos de aseo y de cuidado personal (1435). Se clasifican según su tratamiento en el IVA (excluido, exento y gravado) para facilitar el control tributario. Se reconocen cuando la Compañía obtiene el control de la mercancía, normalmente al recibirla en bodega con la factura electrónica del proveedor.
+
+**Medición inicial (costo).** El costo incluye:
+- El precio de compra, neto de descuentos comerciales y rebajas otorgados en la factura o en notas crédito del proveedor.
+- Los **fletes y el transporte hasta los puntos de venta**. Los fletes de las transportadoras se causan **en el mismo comprobante de la factura de compra de la mercancía, como mayor valor del inventario (cuenta 14)**, identificando el NIT de la transportadora, el número de la guía y su valor. No se registran como gasto (5135 o 5235), ni en un documento separado de la compra.
+- Los seguros de transporte y los impuestos no recuperables (por ejemplo, el IVA que no es descontable).
+- Los descuentos por pronto pago que se obtengan después de la compra se restan del costo de la mercancía; si ya se vendió, se restan del costo de ventas.
+
+**Fórmula de costo:** **promedio ponderado**, calculado de forma permanente por el software (sistema de inventario permanente, que además exige el artículo 62 del Estatuto Tributario).
+
+**Medición posterior.** Al cierre de cada período los inventarios se miden al **menor entre el costo y el precio de venta estimado menos los costos de venta**. Se reconoce deterioro (contra el costo de ventas) cuando:
+- el producto está vencido, averiado, en cuarentena o sujeto a retiro de lote ordenado por el INVIMA, y el proveedor no lo recibe en devolución;
+- vence en menos de seis meses y no se espera venderlo ni devolverlo;
+- la regulación de precios de medicamentos fija un precio máximo de venta inferior al costo;
+- hay obsolescencia o lenta rotación (sin ventas en los últimos doce meses).
+
+**Vencidos y destrucción.** Los productos vencidos o deteriorados se separan en el área de cuarentena, según el Manual de condiciones esenciales del servicio farmacéutico (Resolución 1403 de 2007). Se dan de baja contablemente cuando se destruyen por medio de un gestor autorizado, con acta de destrucción firmada por el director técnico y el certificado del gestor, que son también el soporte de la deducción fiscal.
+
+**Tomas físicas.** Se hacen conteos cíclicos mensuales por punto de venta y una toma física completa al cierre del año. Las diferencias se investigan y se ajustan con comprobante aprobado por la gerencia (ajustes de inventario), contra el costo de ventas.
+
+**Mercancía en consignación.** La mercancía recibida en consignación no es inventario de la Compañía mientras el proveedor conserve su control: se controla en cuentas de orden y se reconoce la compra (y la cuenta por pagar) en el momento en que la Compañía la vende o la adquiere.
+
+**Costo de ventas.** Al vender, el costo de la mercancía se reconoce como costo de ventas (6135) al costo promedio vigente. Las devoluciones de clientes reintegran la mercancía al inventario a su costo, salvo que esté deteriorada.`,
+    },
+    {
+      id: "ppe", titulo: "Propiedades, planta y equipo", seccion: "Secciones 17 y 27", cuentas: ["15"],
+      texto: `**Reconocimiento.** Se reconocen como propiedades, planta y equipo los activos tangibles que la Compañía usa en su operación o en la administración, que espera usar más de un año, de los cuales es probable obtener beneficios y cuyo costo puede medirse con fiabilidad: terrenos, edificaciones, el sistema de energía solar, muebles y enseres, equipo de oficina, equipo de cómputo y comunicación, y vehículos.
+
+Los elementos cuyo costo sea inferior a **50 UVT** se reconocen como gasto en el momento de la compra, salvo que formen parte de un grupo de activos similares que en conjunto sea material.
+
+**Medición inicial.** Al costo: precio de compra, aranceles e impuestos no recuperables, y todos los costos necesarios para ubicar y poner el activo en condiciones de uso (transporte, instalación, honorarios), menos descuentos.
+
+**Componentes.** Cuando partes de un activo tienen vidas útiles distintas, se registran y deprecian por separado. En particular, el **sistema solar fotovoltaico** (paneles e inversores) se controla como componente separado de la edificación, y el **terreno** se registra separado de la construcción (el terreno no se deprecia).
+
+**Medición posterior.**
+- **Terrenos y edificaciones: modelo de revaluación.** Se miden por su valor revaluado (valor razonable según avalúo técnico, menos la depreciación posterior). Los avalúos los hace un perito independiente inscrito en el Registro Abierto de Avaluadores, **por lo menos cada tres años** o antes si hay indicios de un cambio significativo. El aumento por revaluación se reconoce en el otro resultado integral y se acumula en el patrimonio como **superávit por revaluación**; las disminuciones se reconocen en resultados, en la parte que exceda el superávit acumulado del mismo activo.
+- **Los demás elementos: modelo del costo**, es decir, costo menos depreciación acumulada y deterioro acumulado.
+
+**Depreciación.** Por el método de **línea recta**, a partir del mes en que el activo está disponible para su uso, y se registra **mensualmente**. Vidas útiles de referencia:
+- Edificaciones: 45 años.
+- Sistema solar fotovoltaico: 25 años.
+- Maquinaria y equipo de oficina: 10 años.
+- Muebles y enseres: 10 años.
+- Equipo de cómputo y comunicación: 5 años.
+- Vehículos y motocicletas: 10 años y 5 años, respectivamente.
+
+El valor residual es cero, salvo en los vehículos, para los que se estima el valor por el que se espera venderlos al final de su uso. Las vidas útiles, los valores residuales y el método se revisan al cierre de cada año.
+
+**Mantenimiento y mejoras.** El mantenimiento y las reparaciones se reconocen como gasto. Las mejoras que aumentan la capacidad o la vida útil se suman al costo del activo.
+
+**Deterioro (Sección 27).** Al cierre de cada año se evalúa si hay indicios de deterioro (daño físico, obsolescencia, caída del valor de mercado). Si los hay, se estima el importe recuperable y se reconoce la pérdida en resultados.
+
+**Baja.** Al vender o retirar un activo, la diferencia entre el valor recibido y su valor en libros se reconoce en resultados, y el superávit por revaluación relacionado se traslada directamente a resultados acumulados.
+
+**Tratamiento fiscal.** La depreciación deducible se limita a las tasas máximas del artículo 137 del Estatuto Tributario. La revaluación no tiene efecto fiscal. El beneficio por inversión en fuentes no convencionales de energía (Ley 1715 de 2014) se aplica en la declaración de renta y no modifica la medición contable. Las diferencias generan impuesto diferido.`,
+    },
+    {
+      id: "intangibles", titulo: "Activos intangibles y gastos pagados por anticipado", seccion: "Secciones 18 y 2", cuentas: ["16", "17", "19"],
+      texto: `**Intangibles.** Se reconocen como intangibles las licencias de software adquiridas a perpetuidad y otros derechos identificables controlados por la Compañía, siempre que su costo sea material. Se miden al costo menos la amortización acumulada, en línea recta durante su vida útil. Si la vida útil no puede estimarse con fiabilidad, se usa **diez años**, como lo establece la Sección 18.
+
+Las suscripciones a software como servicio (por ejemplo, el software contable y de facturación en la nube), los dominios y las licencias anuales se reconocen como **gasto** en el período que cubren. Los gastos de investigación, publicidad, capacitación y puesta en marcha se reconocen como gasto cuando se incurren.
+
+**Gastos pagados por anticipado.** Los pagos de seguros, pólizas y arrendamientos que cubren períodos futuros se reconocen como activo cuando el valor pagado supera **5 SMMLV** y la cobertura excede tres meses, y se amortizan en línea recta durante la vigencia. Los pagos menores se reconocen directamente como gasto.`,
+    },
+    {
+      id: "arrendamientos", titulo: "Arrendamientos", seccion: "Sección 20", cuentas: ["5120", "5220"],
+      texto: `**Como arrendatario.** Al inicio de cada contrato la Compañía evalúa si transfiere sustancialmente todos los riesgos y ventajas inherentes a la propiedad del activo.
+
+- **Arrendamiento operativo** (caso habitual de los locales comerciales de los puntos de venta y bodegas): el canon se reconoce como gasto en línea recta durante el plazo del contrato (5120 o 5220, según el uso del local). Los incrementos pactados se reconocen cuando ocurren si obedecen a la inflación esperada.
+- **Arrendamiento financiero** (por ejemplo, leasing de vehículos o equipos con opción de compra que se espera ejercer): se reconoce un activo y un pasivo por el menor entre el valor razonable del bien y el valor presente de los pagos mínimos. El activo se deprecia y el pasivo se mide a costo amortizado.
+
+Los contratos se revelan con los pagos futuros mínimos por plazos (hasta un año, entre uno y cinco años y más de cinco años).`,
+    },
+    {
+      id: "obligaciones", titulo: "Obligaciones financieras", seccion: "Sección 11", cuentas: ["21"],
+      texto: `**Reconocimiento.** Los préstamos con bancos (pagarés, créditos de tesorería, tarjetas de crédito empresariales) se reconocen cuando se recibe el desembolso, por el valor recibido neto de los costos de transacción.
+
+**Medición posterior.** A **costo amortizado** con el método del interés efectivo. Cuando los costos de transacción no son materiales, el costo amortizado equivale al saldo de capital más los intereses causados. Los intereses se reconocen mensualmente como gasto financiero (530520), aunque no se hayan pagado.
+
+**Presentación.** Se separa la porción que vence en los doce meses siguientes (corriente) de la que vence después (no corriente). Si al cierre la Compañía incumple una condición del crédito que permite al banco exigir el pago inmediato, toda la deuda se presenta como corriente.
+
+**Revelación.** Entidad, tasa, plazo, garantías otorgadas y vencimientos.`,
+    },
+    {
+      id: "cxp", titulo: "Proveedores y cuentas por pagar", seccion: "Sección 11", cuentas: ["22", "23"],
+      texto: `**Reconocimiento.** Las cuentas por pagar a proveedores de mercancía (2205) y a acreedores por bienes y servicios (2335, 2380) se reconocen cuando la Compañía recibe el bien o el servicio, con la factura electrónica del proveedor o el documento soporte de adquisiciones a no obligados a facturar. Toda factura recibida en la DIAN debe quedar registrada en el período al que corresponde; la conciliación mensual contra el reporte de documentos electrónicos de la DIAN es obligatoria.
+
+**Medición.** Por el valor de la factura, porque se pagan en plazos normales y sin intereses. Si se pacta un plazo superior a doce meses sin intereses o con intereses inferiores a los de mercado, se miden a costo amortizado.
+
+**Deuda con socios (2355).** Se reconoce por el valor recibido. Si no devenga intereses y no tiene fecha de pago, se presenta como pasivo corriente (exigible). Si tiene un plazo superior a un año sin intereses, se mide a costo amortizado. Se revela como transacción con partes relacionadas.
+
+**Retenciones y aportes (2365, 2367, 2368, 2370).** Las retenciones practicadas y los aportes de nómina por pagar se reconocen en el mes en que se practican y se pagan en los plazos legales.
+
+**Baja.** Una cuenta por pagar se da de baja cuando se paga, se compensa o prescribe. Los saldos a favor de proveedores (notas crédito pendientes) se presentan como cuenta por cobrar.`,
+    },
+    {
+      id: "impuestos_pagar", titulo: "Impuestos, gravámenes y tasas por pagar", seccion: "Secciones 21 y 29", cuentas: ["24"],
+      texto: `Los impuestos distintos del de renta se reconocen cuando surge la obligación legal:
+
+- **IVA (2408).** El IVA generado en las ventas gravadas y el IVA descontable de las compras se registran en cuentas separadas y se liquidan en la declaración bimestral o cuatrimestral. El IVA pagado en compras de bienes y servicios relacionados con ventas excluidas, o que no cumpla los requisitos para ser descontable, se suma al costo o al gasto. La venta de medicamentos excluidos, exentos y gravados se controla por separado para calcular la proporcionalidad del IVA descontable.
+- **Industria y comercio (ICA).** Se causa mensualmente con base en los ingresos de cada municipio donde la Compañía tiene puntos de venta y se reconoce como gasto (511505). Las retenciones de ICA que practican los clientes se descuentan en la declaración.
+- **Gravamen a los movimientos financieros.** Se reconoce como gasto financiero cuando se debita.
+
+Los saldos por pagar se miden por el valor que se espera pagar según las declaraciones.`,
+    },
+    {
+      id: "renta", titulo: "Impuesto a las ganancias (renta corriente y diferido)", seccion: "Sección 29", cuentas: ["2404", "1710", "2725"],
+      texto: `**Impuesto corriente.** Es el impuesto sobre la renta por pagar del período, calculado con la tarifa vigente (artículo 240 del Estatuto Tributario: 35 % para 2026) sobre la renta líquida gravable. Se reconoce **mensualmente** una provisión estimada, calculada sobre la utilidad acumulada ajustada por las partidas no deducibles conocidas, y se ajusta al cierre del año con la liquidación definitiva. El gasto se presenta en 5405 y el pasivo en 2404, neto de anticipos, retenciones y autorretenciones.
+
+**Impuesto diferido.** Se reconoce por el **método del pasivo**, sobre las diferencias temporarias entre el valor en libros de activos y pasivos y su base fiscal. En la Compañía surgen principalmente por:
+- el deterioro de cartera contable que exceda el deducible fiscal;
+- la revaluación de terrenos y edificaciones;
+- las diferencias entre la depreciación contable y la fiscal (vidas útiles, beneficio de la Ley 1715);
+- las provisiones que solo son deducibles cuando se pagan.
+
+Se mide con las tarifas que se esperan aplicar cuando la diferencia se revierta, según la ley vigente al cierre: la tarifa general de renta o, para terrenos y edificaciones poseídos por más de dos años, la tarifa de ganancias ocasionales. Los activos por impuesto diferido se reconocen solo en la medida en que sea probable que haya utilidades fiscales futuras. El impuesto diferido de la revaluación se reconoce en el otro resultado integral; el resto, en resultados.
+
+**Segundo Pilar.** La excepción incorporada por el Decreto 0701 de 2026 no tiene efecto, porque la Compañía no forma parte de un grupo multinacional sujeto al impuesto mínimo global.
+
+**Incertidumbres.** Cuando una posición fiscal sea incierta (por ejemplo, la deducción de una partida discutida), se evalúa la probabilidad de que la DIAN la acepte y, si no es probable, se reconoce el mayor impuesto y, cuando corresponda, la sanción.`,
+    },
+    {
+      id: "empleados", titulo: "Beneficios a los empleados", seccion: "Sección 28", cuentas: ["25"],
+      texto: `La Compañía solo tiene **beneficios a corto plazo** y por terminación. No tiene planes de pensiones propios ni beneficios a largo plazo.
+
+**Corto plazo.** Salarios, auxilio de transporte, horas extras, bonificaciones, aportes a seguridad social (salud, pensión y riesgos laborales) y parafiscales (caja de compensación, ICBF y SENA, cuando apliquen), y las prestaciones sociales (cesantías, intereses sobre cesantías, prima de servicios y vacaciones). Se reconocen como gasto y como pasivo **mensualmente**, a medida que el empleado presta el servicio, en las cuentas de gastos de personal de administración (5105) o de ventas (5205), según el cargo.
+
+**Consolidación.** Al cierre del año se consolidan las prestaciones por trabajador, según lo que efectivamente se adeuda conforme al Código Sustantivo del Trabajo, y se ajusta la diferencia con lo causado. Las cesantías se consignan al fondo antes del 14 de febrero y los intereses sobre cesantías se pagan a los trabajadores en enero.
+
+**Beneficios por terminación.** Las indemnizaciones por despido sin justa causa se reconocen cuando la Compañía se compromete de forma demostrable a terminar el contrato.
+
+**Nómina electrónica.** Cada pago de nómina debe estar soportado con el documento de nómina electrónica transmitido a la DIAN, que es requisito para su deducción.`,
+    },
+    {
+      id: "provisiones", titulo: "Provisiones, pasivos y activos contingentes", seccion: "Sección 21", cuentas: ["26"],
+      texto: `**Provisión.** Se reconoce cuando la Compañía tiene una obligación presente (legal o implícita) por un suceso pasado, es probable que deba pagarla y su valor puede estimarse con fiabilidad. Ejemplos: litigios laborales o comerciales con fallo probable en contra, sanciones de la DIAN o de las autoridades sanitarias, y devoluciones de mercancía comprometidas con clientes. Se mide por la mejor estimación del desembolso y se revisa en cada cierre.
+
+**Pasivo contingente.** Si la obligación es solo posible, o su valor no puede estimarse, no se reconoce: se revela en las notas, salvo que la probabilidad de pago sea remota.
+
+**Activo contingente.** No se reconocen activos contingentes (por ejemplo, los intereses de mora reclamados judicialmente a los clientes o las demandas a favor). Se revelan cuando su cobro es probable y se reconocen solo cuando es prácticamente cierto.
+
+La gerencia, con el apoyo de los abogados, informa al cierre de cada año el estado de los procesos judiciales y administrativos.`,
+    },
+    {
+      id: "anticipos_clientes", titulo: "Anticipos y avances recibidos de clientes", seccion: "Secciones 11 y 23", cuentas: ["28"],
+      texto: `Los valores recibidos de clientes antes de entregar la mercancía (consignaciones sin factura asociada, pagos anticipados de IPS y ESE) se reconocen como **pasivo** (2805) por el valor recibido. Se aplican a la factura cuando se entrega la mercancía o se reintegran al cliente.
+
+Cartera identifica cada recaudo con su cliente y su factura en el mismo mes. Los anticipos que al cierre del año lleven más de doce meses sin aplicarse se analizan con el cliente, y se presenta como no corriente lo que no se espere aplicar en los doce meses siguientes.`,
+    },
+    {
+      id: "patrimonio", titulo: "Patrimonio", seccion: "Sección 22", cuentas: ["3"],
+      texto: `- **Capital.** Se reconoce el capital suscrito y pagado por el valor nominal de las acciones (3105). El capital suscrito y no pagado se presenta como menor valor del patrimonio.
+- **Reservas.** La Compañía constituye la **reserva legal** con el 10 % de las utilidades líquidas de cada ejercicio, hasta que alcance el 50 % del capital suscrito (artículo 452 del Código de Comercio, aplicable a las S.A.S. por remisión del artículo 45 de la Ley 1258 de 2008), salvo que los estatutos dispongan otra cosa. Las reservas ocasionales se constituyen por decisión de la asamblea.
+- **Resultado del ejercicio y resultados acumulados.** La utilidad del ejercicio se traslada a resultados acumulados una vez la asamblea aprueba los estados financieros y decide su destinación.
+- **Dividendos.** Se reconocen como pasivo cuando la asamblea los decreta.
+- **Superávit por revaluación (otro resultado integral).** Recoge las revaluaciones de terrenos y edificaciones, netas de su impuesto diferido. Se traslada a resultados acumulados cuando el activo se vende o se da de baja. Las «valorizaciones» del marco contable anterior no se mantienen como tales: solo se conserva el superávit que esté soportado en un avalúo técnico conforme al modelo de revaluación.`,
+    },
+    {
+      id: "ingresos", titulo: "Ingresos de actividades ordinarias", seccion: "Sección 23", cuentas: ["41"],
+      texto: `**Venta de mercancías.** El ingreso se reconoce cuando se cumplen todas estas condiciones: se transfirieron al comprador los riesgos y ventajas de la propiedad; la Compañía no conserva el control de la mercancía; el valor del ingreso y los costos pueden medirse con fiabilidad, y es probable recibir los beneficios económicos.
+- **Ventas en mostrador (puntos de venta):** en el momento de la venta, con la factura electrónica o el documento equivalente POS.
+- **Ventas institucionales y a domicilio:** cuando la mercancía se entrega al cliente, con la constancia de recibo.
+
+**Medición.** Por el valor razonable de la contraprestación recibida o por recibir, neto de:
+- descuentos comerciales y por volumen;
+- descuentos condicionados por pronto pago, cuando se espera que el cliente los tome;
+- devoluciones y rebajas, soportadas con nota crédito electrónica (4175).
+
+El IVA facturado y las estampillas no son ingresos de la Compañía.
+
+**Precios regulados.** Los precios de venta de los medicamentos sujetos al régimen de control de precios no pueden superar los máximos fijados por la Comisión Nacional de Precios de Medicamentos y Dispositivos Médicos.
+
+**Otros ingresos.** Los intereses se reconocen por el método del interés efectivo; los intereses de mora a cargo de clientes, solo cuando su cobro es probable. Las recuperaciones de deterioro, las indemnizaciones (incapacidades reconocidas por las EPS) y los aprovechamientos se presentan como ingresos no operacionales (42).
+
+**Facturación electrónica.** Ningún ingreso se reconoce sin factura electrónica validada por la DIAN o documento equivalente. Las facturas anuladas se reversan con nota crédito electrónica, nunca solo en el software. La conciliación mensual de las ventas contra el reporte de la DIAN es obligatoria.`,
+    },
+    {
+      id: "costos_gastos", titulo: "Costos y gastos", seccion: "Secciones 2, 5 y 13", cuentas: ["5", "6"],
+      texto: `**Reconocimiento.** Los costos y gastos se reconocen cuando se recibe el bien o el servicio (devengo), con independencia de su pago, y con el soporte de la factura electrónica, el documento soporte o la nómina electrónica. Los servicios públicos, arrendamientos, honorarios y demás gastos del mes se causan en el mismo mes, aunque la factura llegue después.
+
+**Clasificación por función.**
+- **Costo de ventas (61):** costo promedio de la mercancía vendida, ajustes de inventario y deterioro de inventarios.
+- **Gastos de administración (51)** y **de ventas (52):** según el área que consume el recurso.
+- **Gastos no operacionales (53):** financieros (intereses, gastos bancarios, comisiones de pasarelas de pago, gravamen a los movimientos financieros), multas y sanciones, donaciones y pérdidas.
+
+**Centros de costo.** Todo costo y gasto se asigna al punto de venta que lo genera (PV1, PV2, PV3) o a la administración central, para los resultados por sede.
+
+**Estampillas** que descuentan las entidades públicas: gasto de administración (519550) en el momento del descuento.
+
+**Gastos no deducibles.** Se registran en las mismas cuentas, pero se identifican para la conciliación fiscal (por ejemplo: multas y sanciones, el 50 % del gravamen a los movimientos financieros, gastos sin soporte válido y los pagos que no cumplan los requisitos de bancarización).`,
+    },
+    {
+      id: "relacionadas", titulo: "Partes relacionadas", seccion: "Sección 33", cuentas: ["2355"],
+      texto: `Son partes relacionadas la accionista, los miembros del personal clave de la gerencia (representante legal y gerentes), sus familiares cercanos y las entidades que cualquiera de ellos controle o en las que tenga influencia significativa.
+
+La Compañía revela en las notas:
+- la remuneración total del personal clave de la gerencia;
+- los saldos y transacciones con partes relacionadas (préstamos de la accionista o a ella, arrendamientos, compras y ventas), sus condiciones y si se pactaron en condiciones de mercado;
+- las garantías otorgadas o recibidas.
+
+Las transacciones con partes relacionadas se registran en terceros identificados para poder extraerlas de la contabilidad.`,
+    },
+    {
+      id: "posteriores", titulo: "Hechos ocurridos después del período", seccion: "Sección 32", cuentas: [],
+      texto: `Son los hechos, favorables o desfavorables, que ocurren entre el cierre y la fecha en que la gerencia autoriza la publicación de los estados financieros.
+
+- **Hechos que implican ajuste:** aportan evidencia de condiciones que ya existían al cierre (por ejemplo, la liquidación de un cliente cuya cartera estaba en mora, un fallo judicial sobre un proceso existente o la venta de inventario a un precio inferior al costo). Se ajustan los estados financieros.
+- **Hechos que no implican ajuste:** reflejan condiciones surgidas después del cierre (por ejemplo, una nueva deuda, la compra de un activo importante o un siniestro). Se revelan si son materiales.
+
+La fecha de autorización para publicar y quién la autoriza se revelan en las notas.`,
+    },
+    {
+      id: "control", titulo: "Responsabilidad, aprobación y actualización", seccion: "Control interno", cuentas: [],
+      texto: `- La **gerencia** es responsable de aprobar y hacer cumplir estas políticas. El **contador público** las aplica, propone sus actualizaciones y responde por que los registros se ajusten a ellas. El **revisor fiscal** verifica su cumplimiento.
+- Las políticas se revisan **por lo menos una vez al año**, antes del cierre, y siempre que cambie la normatividad (en particular, cuando se adopte en Colombia la tercera edición de la NIIF para las Pymes) o la operación de la Compañía.
+- Toda modificación se aprueba por la gerencia, se registra con su fecha y número de versión, y se informa a la asamblea de accionistas junto con los estados financieros de fin de año.
+- **Cierre mensual.** Antes del día 15 de cada mes deben estar: las conciliaciones bancarias; la conciliación de compras y ventas contra el reporte de documentos electrónicos de la DIAN; la causación de nómina, prestaciones, depreciación, amortizaciones, intereses y provisión de renta, y la revisión del balance de prueba.`,
+    },
+  ];
+
+  /* ---------- Vista «Políticas contables»: documento editable, saldos al corte y revisión contra la contabilidad */
+  const POL = { textos: {}, meta: {}, cambios: [], editando: null, editMeta: false, ocupado: "" };
+  const polTexto = (s) => (POL.textos[s.id] != null ? POL.textos[s.id] : s.texto);
+  const polInline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  /** Texto de una política (párrafos, viñetas "- ", negrilla **…**) a HTML. */
+  function polHTML(t) {
+    let html = "", lista = [];
+    const cerrar = () => { if (lista.length) { html += `<ul>${lista.map((x) => `<li>${polInline(x)}</li>`).join("")}</ul>`; lista = []; } };
+    for (const bloque of String(t || "").split(/\n\s*\n/)) {
+      let parr = [];
+      for (const ln of bloque.split("\n")) {
+        if (/^\s*-\s+/.test(ln)) { if (parr.length) { html += `<p>${polInline(parr.join(" "))}</p>`; parr = []; } lista.push(ln.replace(/^\s*-\s+/, "")); }
+        else { cerrar(); if (ln.trim()) parr.push(ln.trim()); }
+      }
+      cerrar(); if (parr.length) html += `<p>${polInline(parr.join(" "))}</p>`;
+    }
+    return html;
+  }
+  /** Revisión de la contabilidad del corte contra las políticas: [estado, texto, id de la política]. */
+  function revisarPoliticas(D) {
+    if (!D || !D.ctx) return [];
+    const { ctx } = D, b = ctx.b, v = (p) => Motor.valor(b, p, "ns"), ac = (p) => ctx.acum(p), mesTx = `${mesNombre(ctx.periodo)} de ${ctx.anio}`;
+    const R = [], $f = (x) => "$ " + fmt(Math.abs(x));
+    const c1399 = v("1399");
+    if (c1399 > 1) R.push(["error", `La cuenta 1399 tiene saldo débito de ${$f(c1399)}. Según la política, la cartera en cobro jurídico va en 1390 (deudas de difícil cobro, no corriente) y la 1399 solo lleva el deterioro, con saldo crédito. Además, no hay deterioro reconocido: hay que evaluarlo cliente por cliente.`, "cxc"]);
+    else if (c1399 < -1) R.push(["ok", `Hay deterioro de cartera reconocido por ${$f(c1399)}.`, "cxc"]);
+    else if (v("13") > 1) R.push(["advertencia", "No hay deterioro de cartera reconocido. Al cierre del trimestre debe evaluarse la cartera vencida.", "cxc"]);
+    const c38 = v("38");
+    if (c38 < -1) R.push(["advertencia", `El patrimonio tiene ${$f(c38)} de «superávit por valorizaciones» (38). Según la política, solo se mantiene si está soportado en un avalúo técnico (modelo de revaluación de terrenos y edificaciones); si no, debe revertirse.`, "ppe"]);
+    const ppeDep = v("15") - v("1504") - v("1592");
+    if (ppeDep > 1 && ctx.mesGet) {
+      const depMes = ctx.mesGet("5160") + ctx.mesGet("5260") + ctx.mesGet("6160");
+      R.push(depMes > 0.5 ? ["ok", `La depreciación de ${mesTx} está registrada (${$f(depMes)}).`, "ppe"] : ["error", `En ${mesTx} no se registró depreciación. La política exige registrarla cada mes.`, "ppe"]);
+    }
+    const util = -["4", "5", "6", "7"].reduce((s, c) => s + ac(c), 0);
+    if (util > 0 && ac("54") < 0.5) R.push(["error", `No se ha provisionado el impuesto de renta de ${ctx.anio} (cuenta 5405 sin movimiento) con una utilidad acumulada de ${$f(util)}. La política exige una provisión mensual.`, "renta"]);
+    else if (ac("54") > 0.5) R.push(["ok", `El impuesto de renta del año está provisionado (${$f(ac("54"))}).`, "renta"]);
+    const fletes = ac("513550") + ac("523550");
+    if (fletes > 1) R.push(["advertencia", `Hay ${$f(fletes)} en «transporte, fletes y acarreos» como gasto en el año. Los fletes de compras de mercancía deben ir en el inventario (cuenta 14), en el comprobante de la factura de compra: verifique que esa cuenta no tenga fletes de mercancía.`, "inventarios"]);
+    if (Math.abs(v("33")) < 1 && v("37") < -1) R.push(["advertencia", `No hay reserva legal (33) y hay ${$f(v("37"))} de utilidades acumuladas. Confirme con los estatutos si debe constituirse.`, "patrimonio"]);
+    if (v("220502") < -1) R.push(["info", `Hay ${$f(v("220502"))} de «mercancía en consignación» como pasivo. Según la política, la mercancía en consignación no es inventario propio hasta que se vende o se adquiere: confirme el tratamiento.`, "inventarios"]);
+    const seguros = ac("5130") + ac("5230");
+    if (seguros > 0.5 && Math.abs(v("17")) < 1) R.push(["info", `Los seguros del año (${$f(seguros)}) están todos en el gasto y no hay gastos pagados por anticipado. Las pólizas que cubren vigencias futuras por más de 5 SMMLV se difieren.`, "intangibles"]);
+    if (v("2355") < -1) R.push(["info", `Hay deuda con socios por ${$f(v("2355"))}: debe revelarse como transacción con partes relacionadas.`, "relacionadas"]);
+    return R;
+  }
+  function vistaPoliticas(D) {
+    const m = POL.meta || {}, e = S.cfg.empresa;
+    const nMod = POLITICAS_BASE.filter((s) => POL.textos[s.id] != null).length;
+    let html = `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:flex-start">
+      <div><h2>Políticas contables</h2><p class="sub" style="margin:0">${esc(e.razon)} · NIT ${esc(e.nit)} · NIIF para las Pymes (Grupo 2), Anexo 2 del Decreto 2420 de 2015</p></div>
+      <div class="fila"><button class="btn" data-pol="meta">Datos de aprobación</button><button class="btn primario" data-pol="pdf">PDF</button></div></div>
+      <p class="pie">Versión ${esc(m.version || "1")} · ${m.fecha ? `aprobada el ${esc(fechaLarga(m.fecha))}` : "pendiente de aprobación"}${m.aprobadoPor ? ` por ${esc(m.aprobadoPor)}` : ""}${m.acta ? ` (${esc(m.acta)})` : ""}${nMod ? ` · ${nMod} ${nMod === 1 ? "sección ajustada" : "secciones ajustadas"} sobre el texto base` : ""}.</p>`;
+    if (POL.editMeta) html += `<div class="pol-meta"><label>Versión <input id="pol-version" value="${esc(m.version || "1")}"></label><label>Fecha de aprobación <input type="date" id="pol-fecha" value="${esc(m.fecha || "")}"></label>
+      <label>Aprobada por <input id="pol-aprobado" value="${esc(m.aprobadoPor || "")}" placeholder="Gerencia / Asamblea de accionistas"></label><label>Acta o documento <input id="pol-acta" value="${esc(m.acta || "")}" placeholder="Acta N.º …"></label>
+      <div class="fila"><button class="btn primario chico" data-pol="metaguardar">Guardar</button><button class="btn chico" data-pol="metacancelar">Cancelar</button></div></div>`;
+    html += `</section>`;
+    // Revisión contra la contabilidad del corte
+    const R = revisarPoliticas(D);
+    if (R.length) {
+      const ord = { error: 0, advertencia: 1, info: 2, ok: 3 }, ETQ = { error: "Corregir", advertencia: "Revisar", info: "Dato", ok: "Cumple" };
+      html += `<section class="panel"><h2>Revisión contra la contabilidad · ${esc(mesNombre(D.ctx.periodo))} ${D.ctx.anio}</h2><p class="sub">Lo que el balance del corte muestra frente a lo que dicen las políticas.</p><div class="pol-rev">
+        ${R.sort((a, b) => ord[a[0]] - ord[b[0]]).map(([t, x, id]) => `<div class="pol-hall ${t}"><span class="chip ${t === "info" ? "gris" : t}">${ETQ[t]}</span><p>${esc(x)}</p><a href="#pol-${id}" data-polir="${id}">Ver política</a></div>`).join("")}</div></section>`;
+    }
+    // Índice
+    html += `<section class="panel"><h2>Contenido</h2><ol class="pol-indice">${POLITICAS_BASE.map((s) => `<li><a href="#pol-${s.id}" data-polir="${s.id}">${esc(s.titulo)}</a>${POL.textos[s.id] != null ? ' <span class="chip info n">ajustada</span>' : ""}</li>`).join("")}</ol></section>`;
+    // Secciones
+    const b = D && D.ctx ? D.ctx.b : null;
+    POLITICAS_BASE.forEach((s, i) => {
+      const mod = POL.textos[s.id] != null, edit = POL.editando === s.id;
+      html += `<section class="panel pol-sec" id="pol-${s.id}"><div class="fila" style="justify-content:space-between;align-items:baseline">
+        <h2>${i + 1}. ${esc(s.titulo)}</h2><span><span class="chip gris">${esc(s.seccion)}</span>${mod ? ' <span class="chip info">ajustada</span>' : ""}</span></div>`;
+      if (edit) {
+        html += `<textarea class="pol-ta" id="pol-ta" rows="18" aria-label="Texto de la política ${esc(s.titulo)}">${esc(polTexto(s))}</textarea>
+          <p class="pie">Párrafos separados por una línea en blanco · viñetas empezando la línea con «- » · negrilla entre **dos asteriscos**.</p>
+          <div class="fila"><button class="btn primario chico" data-pol="guardar" data-id="${s.id}">Guardar</button><button class="btn chico" data-pol="cancelar">Cancelar</button>${mod ? `<button class="btn chico" data-pol="restaurar" data-id="${s.id}">Volver al texto base</button>` : ""}</div>`;
+      } else {
+        html += `<div class="pol-texto">${polHTML(polTexto(s))}</div>`;
+        if (b && s.cuentas.length) {
+          const filas = s.cuentas.map((p) => { const f = b.filas.get(p); const val = Motor.valor(b, p, "ns"); return Math.abs(val) < 0.5 ? "" : `<tr><td>${esc(p)}</td><td>${esc(f ? f.nombre : "")}</td><td class="num${val < 0 ? " neg" : ""}">${fmt(val)}</td></tr>`; }).join("");
+          if (filas) html += `<details class="conf"><summary>Saldos al corte (${esc(mesNombre(D.ctx.periodo))} ${D.ctx.anio})</summary><div><table class="lista"><thead><tr><th>Cuenta</th><th>Nombre</th><th class="num">Saldo</th></tr></thead><tbody>${filas}</tbody></table><p class="pie" style="margin:0">Débitos positivos, créditos entre paréntesis.</p></div></details>`;
+        }
+        html += `<div class="fila" style="margin-top:8px"><button class="btn chico" data-pol="editar" data-id="${s.id}">Editar</button></div>`;
+      }
+      html += `</section>`;
+    });
+    if ((POL.cambios || []).length) html += `<details class="conf"><summary>Historial de cambios (${fmt(POL.cambios.length)})</summary><div><table class="lista"><thead><tr><th>Fecha</th><th>Quién</th><th>Cambio</th></tr></thead><tbody>
+      ${[...POL.cambios].reverse().slice(0, 100).map((c) => `<tr><td>${esc((c.fecha || "").slice(0, 16).replace("T", " "))}</td><td>${esc(c.quien || "")}</td><td>${esc(c.que || "")}</td></tr>`).join("")}</tbody></table></div></details>`;
+    return html;
+  }
+  async function guardarPoliticas(que) {
+    const quien = (window.firebase && firebase.auth && firebase.auth().currentUser && firebase.auth().currentUser.email) || "";
+    POL.cambios = [...(POL.cambios || []), { fecha: new Date().toISOString(), quien, que }].slice(-300);
+    if (!S.db) { toast("Cambio aplicado en esta vista (sin guardado en línea)."); return; }
+    try { await S.db.doc("config/politicas").set({ textos: POL.textos, meta: POL.meta, cambios: POL.cambios }); toast("Políticas guardadas."); }
+    catch (err) { toast(`No se pudieron guardar las políticas: ${err.message || err.code}`); }
+  }
+  function pdfPoliticas() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "letter" });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), m = POL.meta || {};
+    let y = pdfEncabezado(doc, { titulo: "Políticas contables", periodoTexto: `Versión ${m.version || "1"}${m.fecha ? ` · aprobada el ${fechaLarga(m.fecha)}` : ""}` });
+    const salto = (alto) => { if (y + alto > H - 16) { doc.addPage(); y = 18; } };
+    const plano = (t) => limpiarPDF(String(t).replace(/\*\*(.+?)\*\*/g, "$1"));
+    POLITICAS_BASE.forEach((s, i) => {
+      salto(14);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...MARINO);
+      doc.text(plano(`${i + 1}. ${s.titulo}`), 20, (y += 6)); doc.setTextColor(20);
+      doc.setFont("helvetica", "italic"); doc.setFontSize(7.5); doc.text(plano(s.seccion), W - 20, y, { align: "right" });
+      y += 2;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      for (const bloque of polTexto(s).split(/\n\s*\n/)) {
+        for (const ln of bloque.split("\n").reduce((acc, l) => { if (/^\s*-\s+/.test(l) || !acc.length) acc.push(l); else if (/^\s*-\s+/.test(acc[acc.length - 1])) acc.push(l); else acc[acc.length - 1] += " " + l.trim(); return acc; }, [])) {
+          const vin = /^\s*-\s+/.test(ln), txt = plano(ln.replace(/^\s*-\s+/, ""));
+          const lns = doc.splitTextToSize(txt, W - 40 - (vin ? 5 : 0));
+          for (let k = 0; k < lns.length; k++) {
+            salto(4.4);
+            if (vin && k === 0) doc.text("•", 21, y + 4);
+            doc.text(lns[k], vin ? 25 : 20, (y += 4.2));
+          }
+          y += 1.2;
+        }
+        y += 1.4;
+      }
+    });
+    const n = doc.getNumberOfPages();
+    for (let p = 1; p <= n; p++) { doc.setPage(p); doc.setFontSize(7); doc.setTextColor(120); doc.text(`Políticas contables · versión ${m.version || "1"} · página ${p} de ${n}`, W / 2, H - 8, { align: "center" }); }
+    return doc.output("blob");
+  }
+  document.addEventListener("click", async (ev) => {
+    const ir = ev.target.closest("[data-polir]");
+    if (ir) { ev.preventDefault(); const el = document.getElementById("pol-" + ir.dataset.polir); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    const t = ev.target.closest("[data-pol]"); if (!t) return;
+    const a = t.dataset.pol, id = t.dataset.id, sec = POLITICAS_BASE.find((s) => s.id === id);
+    const quedar = (sid) => { render(); const el = sid && document.getElementById("pol-" + sid); if (el) el.scrollIntoView({ block: "start" }); };
+    if (a === "editar") { POL.editando = id; quedar(id); const ta = $("#pol-ta"); if (ta) ta.focus(); return; }
+    if (a === "cancelar") { const sid = POL.editando; POL.editando = null; return quedar(sid); }
+    if (a === "guardar" && sec) {
+      const val = ($("#pol-ta")?.value || "").replace(/\r/g, "").trim();
+      const t2 = { ...POL.textos }; if (!val || val === sec.texto.trim()) delete t2[id]; else t2[id] = val;
+      POL.textos = t2; POL.editando = null; quedar(id);
+      return guardarPoliticas(`Editó «${sec.titulo}»`);
+    }
+    if (a === "restaurar" && sec) { const t2 = { ...POL.textos }; delete t2[id]; POL.textos = t2; POL.editando = null; quedar(id); return guardarPoliticas(`Restauró el texto base de «${sec.titulo}»`); }
+    if (a === "meta") { POL.editMeta = !POL.editMeta; return render(); }
+    if (a === "metacancelar") { POL.editMeta = false; return render(); }
+    if (a === "metaguardar") {
+      POL.meta = { version: $("#pol-version").value.trim() || "1", fecha: $("#pol-fecha").value, aprobadoPor: $("#pol-aprobado").value.trim(), acta: $("#pol-acta").value.trim() };
+      POL.editMeta = false; render();
+      return guardarPoliticas(`Datos de aprobación: versión ${POL.meta.version}${POL.meta.fecha ? `, ${POL.meta.fecha}` : ""}`);
+    }
+    if (a === "pdf") {
+      try { await guardarArchivo(`Politicas_contables_Districlinicas_v${(POL.meta.version || "1").replace(/[^\w.-]/g, "")}.pdf`, pdfPoliticas()); }
+      catch (err) { console.error(err); toast(`No se pudo generar el PDF: ${err.message}`); }
+    }
+  });
+
   /* ---------- Comparativo del año anterior armado con el libro auxiliar (Consulta de movimientos)
      Cuando falta el balance del año anterior al mismo corte, el ERI comparativo se arma con el último
      balance cargado de ese año (exacto) más los movimientos del libro auxiliar de los meses siguientes.
@@ -12111,6 +12605,11 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       prepararCompAux();
     }, () => {});
     db.doc("config/dian").onSnapshot((snap) => { if (snap.exists) S.dn.cfg = { ...S.dn.cfg, ...snap.data() }; }, () => {});
+    db.doc("config/politicas").onSnapshot((snap) => {
+      const x = snap.exists ? snap.data() : {};
+      POL.textos = x.textos || {}; POL.meta = x.meta || {}; POL.cambios = x.cambios || [];
+      if (!S.cargando && S.tab === "politicas" && !POL.editando && !POL.editMeta) render();
+    }, () => {});
     db.collection("firmas").onSnapshot((snap) => {
       FIRMAS.img = new Map(snap.docs.map((d) => [d.id, d.data()]).filter(([, x]) => x && x.img));
       if (!S.cargando && !(S.tab === "config" && S.sucio)) render();
