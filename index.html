@@ -907,7 +907,7 @@ const Motor = (() => {
    * Contexto de un corte: reúne del histórico todo lo que necesitan los estados.
    * hist: Map periodo -> balance indexado.
    */
-  function contexto(hist, periodo, cfg) {
+  function contexto(hist, periodo, cfg, sinteticos = null) {
     const b = hist.get(periodo);
     if (!b) return null;
     const [anio, mes] = anioMes(periodo);
@@ -929,14 +929,16 @@ const Motor = (() => {
     else alertas.push(`Falta el corte ${periodoMas(periodo, -1)}: no se pueden calcular las cifras del mes.`);
 
     // ERI acumulado del año anterior (mismo corte).
-    const prevAnio = hist.get(`${anio - 1}-${pad(mes)}`);
+    // Si ese balance no está cargado, se usa el comparativo armado con el libro auxiliar del año anterior (sinteticos).
+    let prevAnio = hist.get(`${anio - 1}-${pad(mes)}`), compAprox = null;
+    if (!prevAnio && sinteticos && sinteticos.has(`${anio - 1}-${pad(mes)}`)) { const x = sinteticos.get(`${anio - 1}-${pad(mes)}`); prevAnio = x.bal; compAprox = x.nota; }
     const acumAnt = prevAnio ? g(prevAnio, "ns") : null;
     if (!prevAnio) alertas.push(`Para el ERI comparativo cargue el balance de ${MESES[mes - 1]} de ${anio - 1}.`);
 
     return {
       b, periodo, anio, mes, alertas, cfg, comp,
       actual: { get: g(b, "ns"), cierre: false, fecha: finDeMes(periodo) },
-      acum: g(b, "ns"), mesGet, acumAnt, balAnt: prevAnio || null,
+      acum: g(b, "ns"), mesGet, acumAnt, balAnt: prevAnio || null, compAprox,
       dias: Math.round((Date.UTC(anio, mes - 1, ultimoDia(periodo)) - Date.UTC(anio, 0, 1)) / 86400000) + 1,
       sedes: vistasSede(hist, periodo),
     };
@@ -4287,7 +4289,7 @@ const VerifDian = (() => {
 
   /* ------------------------------------------------------------ estado */
   const S = {
-    hist: new Map(), cfg: clon(CFG_DEF), periodo: null, tab: "inicio", pendiente: null, errorCarga: null,
+    hist: new Map(), sint: new Map(), cfg: clon(CFG_DEF), periodo: null, tab: "inicio", pendiente: null, errorCarga: null,
     imp: new Map(), decl: new Map(), ter: new Map(), terVer: "cxc", impError: null, impVista: "ret", resVista: "anio",
     db: null, dbListo: false, cargando: true, confirmar: null, sedeVista: "mes", borrador: null, sucio: false,
   };
@@ -4384,7 +4386,7 @@ const VerifDian = (() => {
   /* ------------------------------------------------------------ cálculos del corte */
   function calcular(periodo = S.periodo) {
     if (!periodo || !S.hist.has(periodo)) return null;
-    const ctx = Motor.contexto(S.hist, periodo, S.cfg);
+    const ctx = Motor.contexto(S.hist, periodo, S.cfg, S.sint);
     const E = Motor.esf(ctx), R = Motor.eri(ctx);
     const otros = [...S.hist.keys()].filter((p) => p !== periodo);
     const V = Motor.validar(ctx.b, otros, S.cfg.mapeo, { tolRedondeo: S.cfg.tolRedondeo });
@@ -4451,6 +4453,7 @@ const VerifDian = (() => {
         ...(conAnt ? [v[2], v[2] != null && ing[2] ? v[2] / ing[2] : null, ...var_(v[0], v[2])] : [])] };
     });
     const pie = [];
+    if (conAnt && ctx.compAprox) pie.push(ctx.compAprox);
     if (!conAnt) pie.push(`Para el comparativo con ${a - 1} cargue el balance de ${MESES[m - 1]} de ${a - 1} (mensual) o el acumulado de enero a ${MESES[m - 1]} de ${a - 1}.`);
     if (Math.abs(R.control) > 1) pie.push(`Control: el resultado del ERI difiere del resultado del balance en ${fmt(R.control)}. Revise el mapeo.`);
     return { clave: "eri", hoja: "ERI", titulo: "Estado de Resultado Integral", periodoTexto: conAnt ? `Del 1 de enero al ${fechaLarga(fA)} y del 1 de enero al ${fechaLarga(fAnt)}` : `Del 1 de enero al ${fechaLarga(fA)}`, cols, filas, pie, firmas: true };
@@ -5746,7 +5749,7 @@ const VerifDian = (() => {
     return c;
   }
   function datosRenta(periodo = S.periodo) {
-    const ctx = Motor.contexto(S.hist, periodo, S.cfg), R = Motor.eri(ctx);
+    const ctx = Motor.contexto(S.hist, periodo, S.cfg, S.sint), R = Motor.eri(ctx);
     const [anio, mes] = anioMes(periodo), c = cfgRenta(anio);
     // Retenciones del año: débitos de las cuentas configuradas, mes a mes (los créditos son cruces con la declaración anterior).
     let ret = 0; const faltan = [];
@@ -9492,6 +9495,101 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
     p.catch((err) => { CQ.error = err.message; }).finally(() => { CQ.cargas.delete(k); CQ.comb = null; if (S.tab === "consulta") render(); });
     return p;
   }
+  /* ---------- Comparativo del año anterior armado con el libro auxiliar (Consulta de movimientos)
+     Cuando falta el balance del año anterior al mismo corte, el ERI comparativo se arma con el último
+     balance cargado de ese año (exacto) más los movimientos del libro auxiliar de los meses siguientes.
+     Para el corte de diciembre se usa el libro del año completo, que da los totales anuales exactos.
+     Queda en S.sint (no se guarda ni aparece en el selector de corte); un balance cargado siempre manda. */
+  const movAuxAnio = new Map();
+  function movimientosAnioCQ(anio) {
+    const us = unidadesCQ(anio);
+    if (!us.length) return null;
+    const clave = us.map((m) => `${m.id}_${m.lote}`).join("|");
+    const prev = movAuxAnio.get(anio);
+    if (prev && prev.clave === clave) return prev.p;
+    const p = (async () => {
+      const pm = new Map(), nombres = {};
+      for (const m of us) {
+        let datos = CQ.datos.get(m.id);
+        if (!datos || datos.lote !== m.lote) {
+          const snaps = await Promise.all([...Array(m.partes).keys()].map((i) => S.db.doc(`auxiliarPartes/${m.id}_${m.lote}_${i}`).get()));
+          if (snaps.some((x) => !x.exists)) throw new Error(`Faltan partes del libro auxiliar ${m.desde} a ${m.hasta}.`);
+          datos = parsearCQ(await descomprimirCQ(m.comp, snaps.map((x) => x.data().d).join("")));
+        }
+        const ci = tiposCierre(m.tipos);
+        for (const r of datos.rows) {
+          if (ci.has(r[F_TIPO])) continue;
+          const mes = Number(String(r[F_FEC] || "").slice(5, 7));
+          if (!mes) continue;
+          let a = pm.get(r[F_CTA]); if (!a) pm.set(r[F_CTA], (a = new Array(13).fill(0)));
+          a[mes] += r[F_D] - r[F_C];
+        }
+        Object.assign(nombres, m.cuentas || {});
+      }
+      return { pm, nombres, desde: us[0].desde, hasta: us.at(-1).hasta };
+    })();
+    movAuxAnio.set(anio, { clave, p });
+    p.catch(() => movAuxAnio.delete(anio));
+    return p;
+  }
+  let compAuxClave = "";
+  async function prepararCompAux() {
+    if (!S.db) return;
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const faltan = new Map(); // año anterior → meses de corte sin balance comparativo
+    for (const per of S.hist.keys()) {
+      const [a, m] = anioMes(per), k = `${a - 1}-${pad2(m)}`;
+      if (S.hist.has(k) || !unidadesCQ(a - 1).length) continue;
+      if (!faltan.has(a - 1)) faltan.set(a - 1, []);
+      faltan.get(a - 1).push(m);
+    }
+    const clave = [...faltan].map(([y, ms]) => `${y}:${ms.join(",")}:${unidadesCQ(y).map((u) => u.lote).join(",")}`).join("|") + "|" + [...S.hist.keys()].filter((p) => faltan.has(anioMes(p)[0])).join(",");
+    if (clave === compAuxClave) return;
+    compAuxClave = clave;
+    const sint = new Map();
+    for (const [y, meses] of faltan) {
+      let M;
+      try { M = await movimientosAnioCQ(y); } catch (err) { console.error("Comparativo con el libro auxiliar", err); continue; }
+      if (!M || M.desde > `${y}-01-01`) continue;
+      for (const m of meses) {
+        const k = `${y}-${pad2(m)}`;
+        if (M.hasta < finDeMes(k)) continue;
+        // Base: último balance cargado del año anterior antes del corte (su «nuevo saldo» es el acumulado del año).
+        const base = m === 12 ? null : [...S.hist.keys()].filter((p) => p.startsWith(`${y}-`) && anioMes(p)[1] < m).sort().map((p) => S.hist.get(p)).at(-1) || null;
+        const mb = base ? anioMes(base.periodo)[1] : 0;
+        const ns = new Map();
+        if (base) for (const cod of base.codigos) { const f = base.filas.get(cod); if (f.hoja && /^[4-7]/.test(cod)) ns.set(cod, f.ns); }
+        const hojaDe = (cta) => {
+          if (!base || ns.has(cta)) return cta;
+          for (let l = cta.length - 1; l > 0; l--) if (ns.has(cta.slice(0, l))) return cta.slice(0, l);
+          return [...ns.keys()].find((c) => c.startsWith(cta)) || cta;
+        };
+        for (const [cta, a] of M.pm) {
+          if (!/^[4-7]/.test(cta)) continue;
+          let v = 0; for (let i = mb + 1; i <= m; i++) v += a[i];
+          if (Math.abs(v) < 0.005) continue;
+          const h = hojaDe(cta); ns.set(h, (ns.get(h) || 0) + v);
+        }
+        const nombre = (c) => (base && base.filas.get(c)?.nombre) || M.nombres[c] || "";
+        // Cuentas de mayor (1, 2, 4 y 6 dígitos y las del balance base) con la suma de sus auxiliares, para que las notas armen el detalle igual que con un balance cargado.
+        const tot = new Map(ns);
+        const mayores = new Set(base ? base.codigos.filter((c) => /^[4-7]/.test(c) && !base.filas.get(c).hoja) : []);
+        for (const c of ns.keys()) for (const l of [1, 2, 4, 6]) if (l < c.length) mayores.add(c.slice(0, l));
+        for (const c of mayores) if (!ns.has(c)) { let v = 0; for (const [h, x] of ns) if (h.startsWith(c)) v += x; tot.set(c, v); }
+        const datos = [...tot].map(([c, v]) => [c, nombre(c), 0, 0, 0, Math.round(v * 100) / 100]);
+        const bal = Motor.indexar({ periodo: k, desde: `${y}-01-01`, hasta: finDeMes(k), tipo: "acumulado", centros: [], datos, sintetico: true });
+        const mesTxt = (i) => MESES[i - 1];
+        const nota = base
+          ? `Comparativo ${y}: balance de ${mesTxt(mb)} de ${y} más los movimientos del libro auxiliar de ${mb + 1 === m ? mesTxt(m) : `${mesTxt(mb + 1)} a ${mesTxt(m)}`} de ${y} (Consulta de movimientos). El Excel de MantisWeb trae algunos movimientos sin fecha, que se ubican por su fecha de creación, así que los gastos pueden variar levemente; para cifras exactas cargue el balance de ${mesTxt(m)} de ${y}.`
+          : m === 12 ? `Comparativo ${y}: calculado con el libro auxiliar del año completo (Consulta de movimientos), sin el comprobante de cierre.`
+          : `Comparativo ${y}: calculado con el libro auxiliar de enero a ${mesTxt(m)} de ${y} (Consulta de movimientos). El Excel de MantisWeb trae algunos movimientos sin fecha, que se ubican por su fecha de creación, así que los gastos pueden variar levemente; para cifras exactas cargue el balance de ${mesTxt(m)} de ${y}.`;
+        sint.set(k, { bal, nota });
+      }
+    }
+    S.sint = sint;
+    if (sint.size && !S.cargando && !(S.tab === "config" && S.sucio)) render();
+  }
+
   /** Libro combinado de un año. Devuelve null mientras se descarga. */
   function datosAnioCQ(anio) {
     const us = unidadesCQ(anio);
@@ -11936,6 +12034,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
         try { const data = d.data(); const b = Motor.deDocumento(data); b.cargado = data.cargado; nuevo.set(b.periodo, b); } catch (err) { console.error("Mes ilegible", d.id, err); }
       }
       S.hist = nuevo; S.dbListo = true;
+      prepararCompAux();
       if (!S.periodo || !S.hist.has(S.periodo)) S.periodo = periodos()[0] || null;
       estadoDB(`Histórico en línea · ${S.hist.size} ${S.hist.size === 1 ? "mes" : "meses"}`);
       mesesListos = true;
@@ -12009,6 +12108,7 @@ self.onmessage = async (e) => { try { const r = await leerLibroAux(e.data.buf, e
       S.cq.metas = new Map(snap.docs.map((d) => [d.id, d.data()]));
       S.cq.comb = null;
       if (!S.cargando && S.tab === "consulta" && !S.cq.ocupado) render();
+      prepararCompAux();
     }, () => {});
     db.doc("config/dian").onSnapshot((snap) => { if (snap.exists) S.dn.cfg = { ...S.dn.cfg, ...snap.data() }; }, () => {});
     db.collection("firmas").onSnapshot((snap) => {
