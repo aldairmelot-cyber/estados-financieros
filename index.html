@@ -10060,7 +10060,7 @@ La fecha de autorización para publicar y quién la autoriza se revelan en las n
     if (!E) return html + `<section class="panel"><p class="vacio">Todavía no hay estatutos cargados.</p></section>`;
     const d = E.datos || {};
     html += `<section class="panel"><div class="fila" style="justify-content:space-between;align-items:baseline"><h2>${esc(E.titulo || "Estatutos")}</h2>${E.pdf ? `<button class="btn" data-est="ver" data-id="estatutos">Ver PDF original</button>` : `<span class="chip advertencia">Falta el PDF original</span>`}</div>
-      <table class="lista est-datos"><tbody>${(d.filas || []).map(([k, val]) => `<tr><th>${esc(k)}</th><td>${esc(val)}</td></tr>`).join("")}</tbody></table>
+      <table class="lista est-datos"><tbody>${(d.filas || []).map((x) => (Array.isArray(x) ? x : [x.k, x.v])).map(([k, val]) => `<tr><th>${esc(k)}</th><td>${esc(val)}</td></tr>`).join("")}</tbody></table>
       ${E.pdf ? "" : `<p class="pie">Cargue el PDF escaneado con «Cargar PDF» (tipo «Estatutos») para tener también el original.</p>`}</section>`;
     const R = revisarEstatutos(D);
     if (R.length) {
